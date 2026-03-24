@@ -2,8 +2,8 @@
 // Public API surface for the library.
 
 // Core
-export { GeoParquetExtractor, FORMAT_OPTIONS, getDeviceMaxMemoryMB, getDefaultMemoryLimitMB, MEMORY_STEP, MEMORY_MIN_MB } from './extractor.js';
-export { ExtentData, extractLabel } from './extent_data.js';
+export { GeoParquetExtractor } from './extractor.js';
+export { ExtentData } from './extent_data.js';
 
 // DuckDB adapter
 export { createDuckDBClient } from './duckdb_adapter.js';

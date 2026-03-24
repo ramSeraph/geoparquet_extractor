@@ -27,12 +27,13 @@ export class DefaultMetadataProvider extends MetadataProvider {
 
   /**
    * Get the meta.json URL for a source.
+   * Default: appends '.meta.json' to the parquet URL from getParquetUrl().
    * Override this to change how meta.json URLs are resolved.
    * @param {string} sourceUrl
    * @returns {string}
    */
   getMetaJsonUrl(sourceUrl) {
-    return sourceUrl.replace(/\.(mosaic\.json|pmtiles)$/, '.parquet.meta.json');
+    return this.getParquetUrl(sourceUrl) + '.meta.json';
   }
 
   /** @override */

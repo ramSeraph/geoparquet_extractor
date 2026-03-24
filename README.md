@@ -1,5 +1,7 @@
 # geoparquet-extractor
 
+> ⚠️ **Work in Progress** — API is unstable and may change without notice.
+
 [![npm version](https://img.shields.io/npm/v/geoparquet-extractor)](https://www.npmjs.com/package/geoparquet-extractor)
 [![GitHub release](https://img.shields.io/github/v/release/ramSeraph/geoparquet_extractor)](https://github.com/ramSeraph/geoparquet_extractor/releases/latest)
 

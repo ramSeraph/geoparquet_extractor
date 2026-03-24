@@ -1,62 +1,54 @@
 import { describe, it, expect } from 'vitest';
-import { ExtentData, extractLabel } from '../src/extent_data.js';
-
-describe('extractLabel', () => {
-  it('extracts numeric suffix from partition filename', () => {
-    expect(extractLabel('data.0.parquet')).toBe('0');
-    expect(extractLabel('data.42.parquet')).toBe('42');
-  });
-
-  it('extracts numeric suffix without .parquet', () => {
-    expect(extractLabel('data.7')).toBe('7');
-  });
-
-  it('extracts row group key', () => {
-    expect(extractLabel('rg_0')).toBe('0');
-    expect(extractLabel('rg_15')).toBe('15');
-  });
-
-  it('returns null for non-numeric names', () => {
-    expect(extractLabel('data')).toBeNull();
-    expect(extractLabel('file.parquet')).toBeNull();
-  });
-});
+import { ExtentData } from '../src/extent_data.js';
 
 describe('ExtentData', () => {
   it('requires metadataProvider', () => {
     expect(() => new ExtentData({})).toThrow('metadataProvider is required');
   });
 
-  it('toGeoJSON converts extents to FeatureCollections', () => {
+  it('fetchExtents single returns raw data', async () => {
     const ed = new ExtentData({
-      metadataProvider: { getExtents: async () => ({}) },
+      metadataProvider: {
+        getParquetUrls: async () => ['https://example.com/data.parquet'],
+        getBbox: async () => [77.0, 12.0, 78.0, 13.0],
+        getRowGroupBboxes: async () => ({ rg_0: [77.0, 12.0, 77.5, 12.5], rg_1: [77.5, 12.5, 78.0, 13.0] }),
+      },
+      duckdb: {},
     });
 
-    const extents = {
-      'data.0.parquet': [77.0, 12.0, 78.0, 13.0],
-      'data.1.parquet': [78.0, 12.0, 79.0, 13.0],
-    };
+    const { dataExtents, rgExtents } = await ed.fetchExtents({ sourceUrl: 'test' });
 
-    const { polygons, labelPoints } = ed.toGeoJSON(extents);
-
-    expect(polygons.type).toBe('FeatureCollection');
-    expect(polygons.features).toHaveLength(2);
-    expect(polygons.features[0].geometry.type).toBe('Polygon');
-    expect(polygons.features[0].properties.name).toBe('data.0.parquet');
-    expect(polygons.features[0].properties.label).toBe('0');
-
-    expect(labelPoints.type).toBe('FeatureCollection');
-    expect(labelPoints.features).toHaveLength(2);
-    expect(labelPoints.features[0].geometry.type).toBe('Point');
+    expect(dataExtents).toEqual({ 'data.parquet': [77.0, 12.0, 78.0, 13.0] });
+    expect(rgExtents).toEqual({ 'data.parquet': { rg_0: [77.0, 12.0, 77.5, 12.5], rg_1: [77.5, 12.5, 78.0, 13.0] } });
   });
 
-  it('toGeoJSON handles null extents', () => {
+  it('fetchExtents partitioned returns raw data', async () => {
     const ed = new ExtentData({
-      metadataProvider: { getExtents: async () => ({}) },
+      metadataProvider: {
+        getExtents: async () => ({ 'data.0.parquet': [77, 12, 78, 13] }),
+        getParquetUrls: async () => ['https://example.com/data.0.parquet'],
+        getRowGroupBboxesMulti: async () => ({ 'data.0.parquet': { rg_0: [77, 12, 77.5, 12.5] } }),
+      },
+      duckdb: {},
     });
 
-    const { polygons, labelPoints } = ed.toGeoJSON(null);
-    expect(polygons.features).toHaveLength(0);
-    expect(labelPoints.features).toHaveLength(0);
+    const { dataExtents, rgExtents } = await ed.fetchExtents({ sourceUrl: 'test', partitioned: true });
+
+    expect(dataExtents).toEqual({ 'data.0.parquet': [77, 12, 78, 13] });
+    expect(rgExtents).toEqual({ 'data.0.parquet': { rg_0: [77, 12, 77.5, 12.5] } });
+  });
+
+  it('fetchExtents without duckdb skips row groups', async () => {
+    const ed = new ExtentData({
+      metadataProvider: {
+        getParquetUrls: async () => ['https://example.com/data.parquet'],
+        getBbox: async () => [77, 12, 78, 13],
+      },
+    });
+
+    const { dataExtents, rgExtents } = await ed.fetchExtents({ sourceUrl: 'test' });
+
+    expect(dataExtents).toEqual({ 'data.parquet': [77, 12, 78, 13] });
+    expect(rgExtents).toBeNull();
   });
 });

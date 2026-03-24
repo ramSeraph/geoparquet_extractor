@@ -10,18 +10,6 @@ import { ShapefileFormatHandler } from './formats/shapefile.js';
 import { KmlFormatHandler } from './formats/kml.js';
 import { DxfFormatHandler } from './formats/dxf.js';
 
-export const FORMAT_OPTIONS = [
-  { value: 'geopackage', label: 'GeoPackage (.gpkg)' },
-  { value: 'geojson', label: 'GeoJSON' },
-  { value: 'geojsonseq', label: 'GeoJSONSeq (.geojsonl)' },
-  { value: 'geoparquet', label: 'GeoParquet (v1.1)' },
-  { value: 'geoparquet2', label: 'GeoParquet (v2.0)' },
-  { value: 'csv', label: 'CSV (WKT geometry)' },
-  { value: 'shapefile', label: 'Shapefile (.shp)' },
-  { value: 'kml', label: 'KML (.kml)' },
-  { value: 'dxf', label: 'DXF (.dxf)' },
-];
-
 /** Normalize extent (array or object) to [minx, miny, maxx, maxy]. */
 function extentBounds(extent) {
   return Array.isArray(extent)
@@ -76,22 +64,7 @@ function extractSessionId(name) {
   return null;
 }
 
-// Memory config
-const MEMORY_STEP = 128;
-const MEMORY_MIN_MB = 512;
 
-export function getDeviceMaxMemoryMB() {
-  const deviceMemGB = navigator.deviceMemory || 4;
-  return Math.max(MEMORY_MIN_MB, Math.floor(deviceMemGB * 1024 * 0.75 / MEMORY_STEP) * MEMORY_STEP);
-}
-
-export function getDefaultMemoryLimitMB() {
-  const deviceMemGB = navigator.deviceMemory || 4;
-  const halfMB = Math.floor(deviceMemGB * 1024 * 0.5 / MEMORY_STEP) * MEMORY_STEP;
-  return Math.max(MEMORY_MIN_MB, Math.min(halfMB, getDeviceMaxMemoryMB()));
-}
-
-export { MEMORY_STEP, MEMORY_MIN_MB };
 
 /**
  * @typedef {Object} GeoParquetExtractorOptions

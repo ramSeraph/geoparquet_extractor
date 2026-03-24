@@ -16,12 +16,13 @@
 export class MetadataProvider {
   /**
    * Transform a source URL to a single parquet URL.
-   * Default: replace .mosaic.json or .pmtiles extension with .parquet.
+   * Default: returns sourceUrl as-is (assumes it is already a parquet URL).
+   * Override this to handle custom URL schemes (e.g., .pmtiles → .parquet).
    * @param {string} sourceUrl
    * @returns {string}
    */
   getParquetUrl(sourceUrl) {
-    return sourceUrl.replace(/\.(mosaic\.json|pmtiles)$/, '.parquet');
+    return sourceUrl;
   }
 
   /**

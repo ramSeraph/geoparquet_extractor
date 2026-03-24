@@ -1,7 +1,5 @@
-// ExtentData — data-fetching and GeoJSON generation for partition/row-group bboxes.
-// This is the headless (no UI/map) portion extracted from extent_handler.js.
-// Consumers use this class to fetch extent data and convert it to GeoJSON
-// for visualization in their own map library.
+// ExtentData — fetches partition-level and row-group-level bounding boxes.
+// Returns raw extent data; callers handle presentation (GeoJSON, labels, etc.).
 
 /**
  * @typedef {Object} ExtentDataOptions
@@ -27,7 +25,12 @@ export class ExtentData {
    * @param {boolean} [options.partitioned=false] - Whether the source is partitioned
    * @param {boolean} [options.includeRowGroups=true] - Whether to fetch row-group bboxes
    * @param {(msg: string) => void} [options.onStatus] - Status callback
-   * @returns {Promise<{ dataExtents: Object|null, rgExtents: Object|null }>}
+   * @returns {Promise<{
+   *   dataExtents: Object<string, number[]> | null,
+   *   rgExtents: Object<string, Object<string, number[]>> | null
+   * }>}
+   *   dataExtents: { filename: [minx,miny,maxx,maxy] }
+   *   rgExtents: { filename: { rg_N: [minx,miny,maxx,maxy] } }
    */
   async fetchExtents({ sourceUrl, partitioned = false, includeRowGroups = true, onStatus }) {
     if (partitioned) {
@@ -35,48 +38,6 @@ export class ExtentData {
     } else {
       return this._fetchSingle(sourceUrl, includeRowGroups, onStatus);
     }
-  }
-
-  /**
-   * Convert an extents map { name: [minx,miny,maxx,maxy] } to GeoJSON.
-   * Returns a FeatureCollection with Polygon features (bbox rectangles)
-   * and Point features (label anchors at top-left corner).
-   *
-   * @param {Object<string, number[]>} extents
-   * @returns {{ polygons: object, labelPoints: object }}
-   */
-  toGeoJSON(extents) {
-    if (!extents) return { polygons: emptyFC(), labelPoints: emptyFC() };
-
-    const polyFeatures = [];
-    const labelFeatures = [];
-
-    for (const [name, bbox] of Object.entries(extents)) {
-      const [minx, miny, maxx, maxy] = normalizeBbox(bbox);
-      const label = extractLabel(name) ?? '';
-
-      polyFeatures.push({
-        type: 'Feature',
-        properties: { name, label },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [[[minx, miny], [maxx, miny], [maxx, maxy], [minx, maxy], [minx, miny]]],
-        },
-      });
-
-      if (label) {
-        labelFeatures.push({
-          type: 'Feature',
-          properties: { label },
-          geometry: { type: 'Point', coordinates: [minx, maxy] },
-        });
-      }
-    }
-
-    return {
-      polygons: { type: 'FeatureCollection', features: polyFeatures },
-      labelPoints: { type: 'FeatureCollection', features: labelFeatures },
-    };
   }
 
   // --- Private ---
@@ -90,19 +51,9 @@ export class ExtentData {
       const parquetUrls = await this._metadataProvider.getParquetUrls(sourceUrl);
       if (parquetUrls?.length) {
         onStatus?.('Loading row groups...');
-        const allRgBboxes = await this._metadataProvider.getRowGroupBboxesMulti(
+        rgExtents = await this._metadataProvider.getRowGroupBboxesMulti(
           parquetUrls, this._duckdb
         );
-        if (allRgBboxes) {
-          rgExtents = {};
-          for (const [filename, rgGroups] of Object.entries(allRgBboxes)) {
-            const partLabel = extractLabel(filename);
-            for (const [rgKey, bbox] of Object.entries(rgGroups)) {
-              rgExtents[partLabel ? `${partLabel}.${rgKey.replace('rg_', '')}` : rgKey] = bbox;
-            }
-          }
-          if (!Object.keys(rgExtents).length) rgExtents = null;
-        }
       }
     }
 
@@ -125,35 +76,13 @@ export class ExtentData {
     let rgExtents = null;
     if (includeRowGroups && this._duckdb) {
       onStatus?.('Loading row groups...');
-      rgExtents = await this._metadataProvider.getRowGroupBboxes(parquetUrl, this._duckdb);
+      const rgBboxes = await this._metadataProvider.getRowGroupBboxes(parquetUrl, this._duckdb);
+      if (rgBboxes) {
+        const filename = parquetUrl.substring(parquetUrl.lastIndexOf('/') + 1);
+        rgExtents = { [filename]: rgBboxes };
+      }
     }
 
     return { dataExtents, rgExtents };
   }
-}
-
-// --- Helpers ---
-
-function normalizeBbox(bbox) {
-  return Array.isArray(bbox)
-    ? bbox
-    : [bbox.minx, bbox.miny, bbox.maxx, bbox.maxy];
-}
-
-/**
- * Extract a human-readable label from a partition filename or row-group key.
- * @param {string} name
- * @returns {string|null}
- */
-export function extractLabel(name) {
-  const clean = name.replace(/\.parquet$/, '');
-  const dotMatch = clean.match(/\.(\d+)$/);
-  if (dotMatch) return dotMatch[1];
-  const rgMatch = clean.match(/^rg_(\d+)$/);
-  if (rgMatch) return rgMatch[1];
-  return null;
-}
-
-function emptyFC() {
-  return { type: 'FeatureCollection', features: [] };
 }
