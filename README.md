@@ -1,5 +1,8 @@
 # geoparquet-extractor
 
+[![npm version](https://img.shields.io/npm/v/geoparquet-extractor)](https://www.npmjs.com/package/geoparquet-extractor)
+[![GitHub release](https://img.shields.io/github/v/release/ramSeraph/geoparquet_extractor)](https://github.com/ramSeraph/geoparquet_extractor/releases/latest)
+
 Extract and convert spatial data from remote GeoParquet files in the browser. Supports bbox filtering, multiple output formats, and pluggable metadata providers.
 
 > **Browser-only** — requires Origin Private File System (OPFS), Web Workers, and Web Locks APIs.
