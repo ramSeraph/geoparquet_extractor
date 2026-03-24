@@ -3,6 +3,9 @@ import { resolve } from 'path';
 import { copyFileSync, existsSync } from 'fs';
 
 export default defineConfig({
+  test: {
+    environment: 'jsdom',
+  },
   build: {
     lib: {
       entry: {
