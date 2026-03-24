@@ -42,6 +42,10 @@
   ],
   "author": "",
   "license": "Unlicense",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ramSeraph/geoparquet_extractor"
+  },
   "peerDependencies": {
     "duckdb-wasm-opfs-tempdir": ">=1.33.0"
   },
