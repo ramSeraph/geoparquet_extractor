@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "checkJs": false,
+    "strict": false,
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "allowJs": true,
+    "outDir": "dist/types",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src/**/*.js"],
+  "exclude": ["node_modules", "dist", "test", "src/workers/**"]
+}
