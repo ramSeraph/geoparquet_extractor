@@ -296,23 +296,24 @@ export class GeoParquetExtractor {
     onProgress?.(PROGRESS_WRITE_START);
 
     // Apply proxy URL to all parquet URLs
-    const resolvedUrls = parquetUrls.map(u => proxyUrl(u, { absolute: true }));
+    const resolvedUrls = parquetUrls.map(u => proxyUrl(u));
+
+    // Format handlers expect bbox as { west, south, east, north } object
+    const bboxObj = Array.isArray(bbox)
+      ? { west: bbox[0], south: bbox[1], east: bbox[2], north: bbox[3] }
+      : bbox;
 
     const handlerOpts = {
       sessionId: this._sessionId,
       duckdb: this._duckdb,
       urls: resolvedUrls,
-      bbox,
+      bbox: bboxObj,
       estimatedBytes,
     };
 
     // Pass gpkg worker config through if needed
     if (format === 'geopackage') {
-      if (this._gpkgWorker) {
-        handlerOpts.gpkgWorker = this._gpkgWorker;
-      } else if (this._gpkgWorkerUrl) {
-        handlerOpts.gpkgWorkerUrl = this._gpkgWorkerUrl;
-      }
+      handlerOpts.gpkgWorker = this._gpkgWorker || this._gpkgWorkerUrl;
     }
 
     this._formatHandler = getFormatHandler(format, handlerOpts);

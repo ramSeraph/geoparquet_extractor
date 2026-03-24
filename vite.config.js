@@ -2,28 +2,33 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import { copyFileSync, existsSync } from 'fs';
 
+// Two-phase build: main entry then worker (BUILD_TARGET=worker).
+// Each entry is self-contained — no shared chunks — so the worker
+// can be loaded independently from any origin.
+const isWorkerBuild = process.env.BUILD_TARGET === 'worker';
+
 export default defineConfig({
   test: {
     environment: 'jsdom',
   },
   build: {
     lib: {
-      entry: {
-        'geoparquet-extractor': resolve(__dirname, 'src/index.js'),
-        'gpkg_worker': resolve(__dirname, 'src/workers/gpkg_worker.js'),
-      },
+      entry: isWorkerBuild
+        ? resolve(__dirname, 'src/workers/gpkg_worker.js')
+        : resolve(__dirname, 'src/index.js'),
       formats: ['es'],
+      fileName: isWorkerBuild ? 'gpkg_worker' : 'geoparquet-extractor',
     },
     rollupOptions: {
-      external: [
-        'duckdb-wasm-opfs-tempdir',
-      ],
+      external: isWorkerBuild ? [] : ['duckdb-wasm-opfs-tempdir'],
     },
+    outDir: 'dist',
+    emptyOutDir: !isWorkerBuild,
     target: 'esnext',
     minify: false,
     sourcemap: true,
   },
-  plugins: [{
+  plugins: isWorkerBuild ? [{
     name: 'copy-wa-sqlite-wasm',
     closeBundle() {
       const src = resolve(__dirname, 'node_modules/wa-sqlite-rtree/dist/wa-sqlite-async.wasm');
@@ -35,5 +40,5 @@ export default defineConfig({
         console.warn('Warning: wa-sqlite-async.wasm not found in node_modules/wa-sqlite-rtree/dist/');
       }
     },
-  }],
+  }] : [],
 });

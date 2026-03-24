@@ -1,6 +1,6 @@
 {
   "name": "geoparquet-extractor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Extract and convert spatial data from remote GeoParquet files. Supports bbox filtering, multiple output formats, and pluggable metadata providers.",
   "type": "module",
   "main": "dist/geoparquet-extractor.js",
@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "dev": "vite build --watch",
-    "build": "vite build && npm run types",
+    "build": "vite build && BUILD_TARGET=worker vite build && npm run types",
     "types": "tsc --project jsconfig.json --declaration --emitDeclarationOnly --allowJs --outDir dist/types",
     "test": "vitest run",
     "test:watch": "vitest",
