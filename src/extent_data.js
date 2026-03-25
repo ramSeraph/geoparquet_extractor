@@ -24,6 +24,8 @@ export class ExtentData {
    * @param {string} options.sourceUrl - Source route URL
    * @param {boolean} [options.partitioned=false] - Whether the source is partitioned
    * @param {boolean} [options.includeRowGroups=true] - Whether to fetch row-group bboxes
+   * @param {string} [options.bboxColumn] - Explicit bbox struct column name (e.g. 'bbox')
+   *   to use for row-group stats when GeoParquet covering metadata is absent.
    * @param {(msg: string) => void} [options.onStatus] - Status callback
    * @returns {Promise<{
    *   dataExtents: Object<string, number[]> | null,
@@ -32,17 +34,17 @@ export class ExtentData {
    *   dataExtents: { filename: [minx,miny,maxx,maxy] }
    *   rgExtents: { filename: { rg_N: [minx,miny,maxx,maxy] } }
    */
-  async fetchExtents({ sourceUrl, partitioned = false, includeRowGroups = true, onStatus }) {
+  async fetchExtents({ sourceUrl, partitioned = false, includeRowGroups = true, bboxColumn, onStatus }) {
     if (partitioned) {
-      return this._fetchPartitioned(sourceUrl, includeRowGroups, onStatus);
+      return this._fetchPartitioned(sourceUrl, includeRowGroups, bboxColumn, onStatus);
     } else {
-      return this._fetchSingle(sourceUrl, includeRowGroups, onStatus);
+      return this._fetchSingle(sourceUrl, includeRowGroups, bboxColumn, onStatus);
     }
   }
 
   // --- Private ---
 
-  async _fetchPartitioned(sourceUrl, includeRowGroups, onStatus) {
+  async _fetchPartitioned(sourceUrl, includeRowGroups, bboxColumn, onStatus) {
     const extents = await this._metadataProvider.getExtents(sourceUrl);
     const dataExtents = extents && Object.keys(extents).length ? extents : null;
 
@@ -52,7 +54,7 @@ export class ExtentData {
       if (parquetUrls?.length) {
         onStatus?.('Loading row groups...');
         rgExtents = await this._metadataProvider.getRowGroupBboxesMulti(
-          parquetUrls, this._duckdb
+          parquetUrls, this._duckdb, { bboxColumn }
         );
       }
     }
@@ -60,7 +62,7 @@ export class ExtentData {
     return { dataExtents, rgExtents };
   }
 
-  async _fetchSingle(sourceUrl, includeRowGroups, onStatus) {
+  async _fetchSingle(sourceUrl, includeRowGroups, bboxColumn, onStatus) {
     const parquetUrls = await this._metadataProvider.getParquetUrls(sourceUrl);
     const parquetUrl = parquetUrls?.[0];
     if (!parquetUrl) return { dataExtents: null, rgExtents: null };
@@ -76,7 +78,9 @@ export class ExtentData {
     let rgExtents = null;
     if (includeRowGroups && this._duckdb) {
       onStatus?.('Loading row groups...');
-      const rgBboxes = await this._metadataProvider.getRowGroupBboxes(parquetUrl, this._duckdb);
+      const rgBboxes = await this._metadataProvider.getRowGroupBboxes(
+        parquetUrl, this._duckdb, { bboxColumn }
+      );
       if (rgBboxes) {
         const filename = parquetUrl.substring(parquetUrl.lastIndexOf('/') + 1);
         rgExtents = { [filename]: rgBboxes };

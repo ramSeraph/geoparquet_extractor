@@ -97,10 +97,12 @@ export class MetadataProvider {
    * Get per-row-group bounding boxes for a single parquet file.
    * @param {string} parquetUrl
    * @param {import('./duckdb_adapter.js').DuckDBClient} duckdb
+   * @param {object} [options]
+   * @param {string} [options.bboxColumn] - Explicit bbox struct column name (e.g. 'bbox')
    * @returns {Promise<Object<string, Bbox> | null>} { rg_N: [minx,miny,maxx,maxy] } or null
    */
-  async getRowGroupBboxes(parquetUrl, duckdb) {
-    const result = await this.getRowGroupBboxesMulti([parquetUrl], duckdb);
+  async getRowGroupBboxes(parquetUrl, duckdb, options) {
+    const result = await this.getRowGroupBboxesMulti([parquetUrl], duckdb, options);
     if (!result) return null;
     const firstKey = Object.keys(result)[0];
     return firstKey ? result[firstKey] : null;
@@ -110,9 +112,12 @@ export class MetadataProvider {
    * Get per-row-group bounding boxes for multiple parquet files in one call.
    * @param {string[]} parquetUrls
    * @param {import('./duckdb_adapter.js').DuckDBClient} duckdb
+   * @param {object} [options]
+   * @param {string} [options.bboxColumn] - Explicit bbox struct column name (e.g. 'bbox')
+   *   to use for row-group stats when GeoParquet covering metadata is absent.
    * @returns {Promise<Object<string, Object<string, Bbox>> | null>}
    */
-  async getRowGroupBboxesMulti(parquetUrls, duckdb) {
+  async getRowGroupBboxesMulti(parquetUrls, duckdb, options) {
     if (!parquetUrls?.length) return null;
 
     const cacheKey = parquetUrls.join('\n');
@@ -128,7 +133,7 @@ export class MetadataProvider {
       }
 
       const firstSafeUrl = proxyUrls[0].replace(/'/g, "''");
-      const coveringPaths = await this._getCoveringBboxPaths(firstSafeUrl, duckdb);
+      const coveringPaths = await this._getCoveringBboxPaths(firstSafeUrl, duckdb, options?.bboxColumn);
       if (!coveringPaths) { this._rgBboxCache.set(cacheKey, null); return null; }
 
       const { xminPath, yminPath, xmaxPath, ymaxPath } = coveringPaths;
@@ -192,20 +197,34 @@ export class MetadataProvider {
     return this._parseKvBlob(rows[0].value);
   }
 
-  async _getCoveringBboxPaths(safeUrl, duckdb) {
+  async _getCoveringBboxPaths(safeUrl, duckdb, bboxColumn) {
     const geoMeta = await this._getGeoMetadata(safeUrl, duckdb);
-    if (!geoMeta) return null;
 
-    const primaryCol = geoMeta.primary_column || 'geometry';
-    const covering = geoMeta.columns?.[primaryCol]?.covering?.bbox;
-    if (!covering) return null;
+    // Try covering metadata from GeoParquet spec first
+    if (geoMeta) {
+      const primaryCol = geoMeta.primary_column || 'geometry';
+      const covering = geoMeta.columns?.[primaryCol]?.covering?.bbox;
+      if (covering) {
+        return {
+          xminPath: covering.xmin?.join(', ') || 'bbox, xmin',
+          yminPath: covering.ymin?.join(', ') || 'bbox, ymin',
+          xmaxPath: covering.xmax?.join(', ') || 'bbox, xmax',
+          ymaxPath: covering.ymax?.join(', ') || 'bbox, ymax',
+        };
+      }
+    }
 
-    return {
-      xminPath: covering.xmin?.join(', ') || 'bbox, xmin',
-      yminPath: covering.ymin?.join(', ') || 'bbox, ymin',
-      xmaxPath: covering.xmax?.join(', ') || 'bbox, xmax',
-      ymaxPath: covering.ymax?.join(', ') || 'bbox, ymax',
-    };
+    // Fall back to explicit bboxColumn if provided
+    if (bboxColumn) {
+      return {
+        xminPath: `${bboxColumn}, xmin`,
+        yminPath: `${bboxColumn}, ymin`,
+        xmaxPath: `${bboxColumn}, xmax`,
+        ymaxPath: `${bboxColumn}, ymax`,
+      };
+    }
+
+    return null;
   }
 
   _parseKvBlob(raw) {
