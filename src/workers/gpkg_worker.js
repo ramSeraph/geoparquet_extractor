@@ -54,7 +54,7 @@ function fileToAsyncBuffer(file) {
     byteLength: file.size,
     async slice(start, end) {
       const blob = file.slice(start, end);
-      return new Uint8Array(await blob.arrayBuffer());
+      return await blob.arrayBuffer();
     },
   };
 }

@@ -65,7 +65,7 @@ export class ExtentData {
     const parquetUrl = parquetUrls?.[0];
     if (!parquetUrl) return { dataExtents: null, rgExtents: null };
 
-    const bbox = await this._metadataProvider.getBbox(sourceUrl, this._duckdb);
+    const bbox = await this._metadataProvider.getBbox(parquetUrl, this._duckdb);
 
     let dataExtents = null;
     if (bbox) {

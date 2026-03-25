@@ -133,6 +133,7 @@ export class GeoParquetExtractor {
     await this._lockReady;
 
     onStatus?.('Configuring DuckDB...');
+    await this._duckdb.init();
     await this._duckdb.query(`SET temp_directory = 'opfs://${OPFS_PREFIX_TMPDIR}${this._sessionId}'`);
 
     if (this._memoryLimitMB) {
@@ -204,7 +205,7 @@ export class GeoParquetExtractor {
       if (partitioned) {
         fileExtents = await this._metadataProvider.getExtents(sourceUrl) || {};
       } else {
-        const overallBbox = await this._metadataProvider.getBbox(sourceUrl, this._duckdb);
+        const overallBbox = await this._metadataProvider.getBbox(parquetUrls[0], this._duckdb);
         if (overallBbox) {
           fileExtents = { [parquetUrls[0]]: overallBbox };
         }

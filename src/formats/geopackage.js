@@ -61,11 +61,15 @@ export class GeoPackageFormatHandler extends FormatHandler {
       stage2.callback, onStatus, 'Writing GeoPackage:', this.estimatedBytes * 1.5
     );
 
-    // Create worker from config
+    // Create worker from config (use blob URL for cross-origin support)
     if (this._gpkgWorkerConfig instanceof Worker) {
       this._worker = this._gpkgWorkerConfig;
     } else {
-      this._worker = new Worker(this._gpkgWorkerConfig, { type: 'module' });
+      const workerUrl = URL.createObjectURL(
+        new Blob([`import "${this._gpkgWorkerConfig}";`], { type: 'text/javascript' })
+      );
+      this._worker = new Worker(workerUrl, { type: 'module' });
+      URL.revokeObjectURL(workerUrl);
     }
 
     try {
