@@ -4,7 +4,7 @@
 // DXF entities streamed to OPFS → header/tables/footer wrapped at download.
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_DXF_TMP, bboxUtmZone, fileToAsyncBuffer } from '../utils.js';
+import { OPFS_PREFIX_DXF_TMP, bboxUtmZone, fileToAsyncBuffer, coerceValue } from '../utils.js';
 import { ScopedProgress } from '../scoped_progress.js';
 import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
@@ -104,7 +104,7 @@ export class DxfFormatHandler extends FormatHandler {
           const geom = parseWkbHex(wkbHex);
           const props = {};
           for (let ci = 0; ci < attrIndices.length; ci++) {
-            const val = row[attrIndices[ci]];
+            const val = coerceValue(row[attrIndices[ci]]);
             props[attrColumns[ci].originalName] = val != null && typeof val === 'object'
               ? JSON.stringify(val) : val;
           }

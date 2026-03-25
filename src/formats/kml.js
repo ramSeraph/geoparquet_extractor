@@ -4,7 +4,7 @@
 // Placemarks streamed as XML text to OPFS → KML header/footer wrapped at download.
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_KML_TMP, fileToAsyncBuffer } from '../utils.js';
+import { OPFS_PREFIX_KML_TMP, fileToAsyncBuffer, coerceValue } from '../utils.js';
 import { ScopedProgress } from '../scoped_progress.js';
 import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
@@ -84,7 +84,7 @@ export class KmlFormatHandler extends FormatHandler {
           const geom = parseWkbHex(wkbHex);
           const props = {};
           for (let ci = 0; ci < attrIndices.length; ci++) {
-            const val = row[attrIndices[ci]];
+            const val = coerceValue(row[attrIndices[ci]]);
             props[attrColumns[ci].originalName] = val != null && typeof val === 'object'
               ? JSON.stringify(val) : val;
           }

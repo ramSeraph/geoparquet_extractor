@@ -75,4 +75,21 @@ export function fileToAsyncBuffer(file) {
   };
 }
 
+/**
+ * Recursively coerce parquet values for serialization/binding.
+ * Converts BigInt → Number.
+ * @param {*} val
+ * @returns {*}
+ */
+export function coerceValue(val) {
+  if (typeof val === 'bigint') return Number(val);
+  if (Array.isArray(val)) return val.map(coerceValue);
+  if (val && typeof val === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(val)) out[k] = coerceValue(v);
+    return out;
+  }
+  return val;
+}
+
 

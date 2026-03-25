@@ -4,6 +4,7 @@
 
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
+import { coerceValue } from '../utils.js';
 import SQLiteESMFactory from 'wa-sqlite-rtree/dist/wa-sqlite-async.mjs';
 import * as SQLite from 'wa-sqlite-rtree/src/sqlite-api.js';
 import { OPFSAdaptiveVFS } from 'wa-sqlite-rtree/src/examples/OPFSAdaptiveVFS.js';
@@ -320,8 +321,12 @@ async function writeFromParquet({ parquetFileName, gpkgFileName }, msgId) {
           row[iMinX], row[iMinY], row[iMaxX], row[iMaxY],
         ];
         for (let ci = 0; ci < attrIndices.length; ci++) {
-          const val = row[attrIndices[ci]];
-          params.push(columns[ci].jsonSerialize && val != null ? JSON.stringify(val) : val);
+          const val = coerceValue(row[attrIndices[ci]]);
+          if (columns[ci].jsonSerialize && val != null) {
+            params.push(JSON.stringify(val));
+          } else {
+            params.push(val);
+          }
         }
         paramSets.push(params);
       }
