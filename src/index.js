@@ -6,11 +6,10 @@ export { GeoParquetExtractor } from './extractor.js';
 export { ExtentData } from './extent_data.js';
 
 // DuckDB adapter
-export { createDuckDBClient } from './duckdb_adapter.js';
+export { createDuckDBClient, initDuckDB } from './duckdb_adapter.js';
 
-// Metadata providers
-export { MetadataProvider } from './metadata/provider.js';
-export { DefaultMetadataProvider } from './metadata/default.js';
+// Metadata provider
+export { MetadataProvider } from './metadata.js';
 
 // Format handlers (for advanced usage / subclassing)
 export { FormatHandler } from './formats/base.js';
@@ -22,10 +21,15 @@ export { ShapefileFormatHandler } from './formats/shapefile.js';
 export { KmlFormatHandler } from './formats/kml.js';
 export { DxfFormatHandler } from './formats/dxf.js';
 
-// Utilities (for advanced usage)
+// Utilities
 export {
   setProxyUrl, proxyUrl,
-  formatSize, ScopedProgress,
-  parseWkbHex, getUtmZone, bboxUtmZone,
+} from './proxy.js';
+export {
+  formatSize, getUtmZone, bboxUtmZone,
+  getStorageEstimate,
   OPFS_PREFIX_TMPDIR,
 } from './utils.js';
+export { ScopedProgress } from './scoped_progress.js';
+export { SizeGetter } from './size_getter.js';
+export { parseWkbHex } from './wkb.js';

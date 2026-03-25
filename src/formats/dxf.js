@@ -4,7 +4,9 @@
 // DXF entities streamed to OPFS → header/tables/footer wrapped at download.
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_DXF_TMP, ScopedProgress, bboxUtmZone, fileToAsyncBuffer, parseWkbHex } from '../utils.js';
+import { OPFS_PREFIX_DXF_TMP, bboxUtmZone, fileToAsyncBuffer } from '../utils.js';
+import { ScopedProgress } from '../scoped_progress.js';
+import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
 import { featureToDxfEntities, buildDxfEnvelope, createUtmTransform } from './dxf_writer.js';

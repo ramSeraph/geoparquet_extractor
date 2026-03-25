@@ -3,7 +3,7 @@
 
 /**
  * @typedef {Object} ExtentDataOptions
- * @property {import('./metadata/provider.js').MetadataProvider} metadataProvider
+ * @property {import('./metadata.js').MetadataProvider} metadataProvider
  * @property {import('./duckdb_adapter.js').DuckDBClient} [duckdb] - Required for row-group bbox queries
  */
 

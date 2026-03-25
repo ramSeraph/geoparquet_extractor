@@ -3,7 +3,8 @@
 // gpkg_worker reads parquet + writes GPKG entirely inside the worker
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_GPKG_TMP, OPFS_PREFIX_GPKG, ScopedProgress } from '../utils.js';
+import { OPFS_PREFIX_GPKG_TMP, OPFS_PREFIX_GPKG } from '../utils.js';
+import { ScopedProgress } from '../scoped_progress.js';
 
 export class GeoPackageFormatHandler extends FormatHandler {
   /**

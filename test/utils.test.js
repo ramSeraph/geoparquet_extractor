@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
-  formatSize, ScopedProgress, parseWkbHex,
+  formatSize,
   getUtmZone, bboxUtmZone,
   getOpfsPrefixes, OPFS_PREFIX_TMPDIR,
 } from '../src/utils.js';
+import { ScopedProgress } from '../src/scoped_progress.js';
+import { parseWkbHex } from '../src/wkb.js';
 
 describe('formatSize', () => {
   it('formats bytes', () => {

@@ -4,7 +4,9 @@
 // record data streamed to OPFS → headers prepended at download time.
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_SHP_TMP, ScopedProgress, fileToAsyncBuffer, formatSize, parseWkbHex } from '../utils.js';
+import { OPFS_PREFIX_SHP_TMP, fileToAsyncBuffer, formatSize } from '../utils.js';
+import { ScopedProgress } from '../scoped_progress.js';
+import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
 import {

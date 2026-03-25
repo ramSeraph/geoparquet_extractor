@@ -1,7 +1,10 @@
 // GeoParquetExtractor — main orchestrator for partial downloads.
 // Headless (no DOM/UI dependencies), designed for library consumers.
 
-import { proxyUrl, OPFS_PREFIX_TMPDIR, getOpfsPrefixes, ScopedProgress } from './utils.js';
+import { proxyUrl } from './proxy.js';
+import { OPFS_PREFIX_TMPDIR, getOpfsPrefixes } from './utils.js';
+import { ScopedProgress } from './scoped_progress.js';
+import { SizeGetter } from './size_getter.js';
 import { CsvFormatHandler } from './formats/csv.js';
 import { GeoJsonFormatHandler } from './formats/geojson.js';
 import { GeoParquetFormatHandler } from './formats/geoparquet.js';
@@ -69,7 +72,7 @@ function extractSessionId(name) {
 /**
  * @typedef {Object} GeoParquetExtractorOptions
  * @property {import('./duckdb_adapter.js').DuckDBClient} duckdb - Pre-initialized DuckDB client
- * @property {import('./metadata/provider.js').MetadataProvider} [metadataProvider] - Optional metadata provider
+ * @property {import('./metadata.js').MetadataProvider} [metadataProvider] - Optional metadata provider
  * @property {string} [gpkgWorkerUrl] - URL for GeoPackage worker (or Worker instance)
  * @property {Worker} [gpkgWorker] - Pre-constructed GeoPackage Worker instance
  * @property {number} [memoryLimitMB] - DuckDB memory limit in MB
@@ -100,6 +103,7 @@ export class GeoParquetExtractor {
     this._gpkgWorkerUrl = gpkgWorkerUrl || null;
     this._gpkgWorker = gpkgWorker || null;
     this._memoryLimitMB = memoryLimitMB || null;
+    this._sizeGetter = new SizeGetter();
     this._formatHandler = null;
     this._cancelled = false;
     this._rejectCancel = null;
@@ -192,7 +196,7 @@ export class GeoParquetExtractor {
   async estimateSize(parquetUrls, bbox, sourceUrl, partitioned) {
     // Get file sizes via HEAD requests
     const sizes = await Promise.all(
-      parquetUrls.map(url => this._getFileSize(url))
+      parquetUrls.map(url => this._sizeGetter.getSizeBytes(url))
     );
 
     let fileExtents = {};
@@ -351,10 +355,12 @@ export class GeoParquetExtractor {
     return this.download(handler, { baseName, onProgress, onStatus });
   }
 
-  /** Cancel any in-flight download. */
+  /** Cancel any in-flight download. Terminates DuckDB to kill in-flight queries. */
   cancel() {
     this._cancelled = true;
     this._formatHandler?.cancel();
+    this._duckdb.terminate();
+    this._initialized = false;
 
     setTimeout(() => {
       if (this._rejectCancel) {
@@ -404,16 +410,5 @@ export class GeoParquetExtractor {
 
   _throwIfCancelled() {
     if (this._cancelled) throw new DOMException('Download cancelled', 'AbortError');
-  }
-
-  async _getFileSize(url) {
-    try {
-      const resp = await fetch(proxyUrl(url), { method: 'HEAD' });
-      if (!resp.ok) return null;
-      const cl = resp.headers.get('content-length');
-      return cl ? parseInt(cl, 10) : null;
-    } catch {
-      return null;
-    }
   }
 }

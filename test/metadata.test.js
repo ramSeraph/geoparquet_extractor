@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MetadataProvider } from '../src/metadata/provider.js';
+import { MetadataProvider } from '../src/metadata.js';
 
 describe('MetadataProvider', () => {
   it('getParquetUrl returns sourceUrl as-is by default', () => {
@@ -20,13 +20,11 @@ describe('MetadataProvider', () => {
       .toBe('https://example.com/path/to/');
   });
 
-  it('abstract methods throw', async () => {
+  it('default implementations return sensible values', async () => {
     const mp = new MetadataProvider();
-    await expect(mp.getPartitions('url')).rejects.toThrow('not implemented');
-    await expect(mp.getExtents('url')).rejects.toThrow('not implemented');
-    await expect(mp.getBbox('url', {})).rejects.toThrow('not implemented');
-    await expect(mp.getRowGroupBboxes('url', {})).rejects.toThrow('not implemented');
-    await expect(mp.getRowGroupBboxesMulti([], {})).rejects.toThrow('not implemented');
-    await expect(mp.getParquetUrls('url')).rejects.toThrow('not implemented');
+    expect(await mp.getPartitions('url')).toBeNull();
+    expect(await mp.getExtents('url')).toBeNull();
+    expect(await mp.getParquetUrls('https://example.com/data.parquet'))
+      .toEqual(['https://example.com/data.parquet']);
   });
 });

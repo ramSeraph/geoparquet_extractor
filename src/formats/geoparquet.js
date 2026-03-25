@@ -2,7 +2,8 @@
 // 3-step pipeline: write temp → compute metadata → re-copy with Hilbert sort
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_OUTPUT, OPFS_PREFIX_TMP, ScopedProgress } from '../utils.js';
+import { OPFS_PREFIX_OUTPUT, OPFS_PREFIX_TMP } from '../utils.js';
+import { ScopedProgress } from '../scoped_progress.js';
 
 // DuckDB returns uppercase; GeoParquet spec requires title case
 const DUCKDB_TO_SPEC = {

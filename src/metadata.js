@@ -1,60 +1,89 @@
 /**
- * @module metadata/default
- * Default metadata provider that reads GeoParquet kv_metadata via DuckDB.
- * Supports partitioned datasets via meta.json files and row-group bbox extraction.
+ * @module metadata
+ * Default metadata provider that reads GeoParquet metadata via DuckDB.
+ * Subclass and override methods to customize for your data source
+ * (e.g., partition-aware meta.json resolution).
  */
 
-import { MetadataProvider } from './provider.js';
-import { proxyUrl } from '../utils.js';
+import { proxyUrl } from './proxy.js';
 
 /**
- * Default implementation of MetadataProvider.
- * Reads parquet metadata via DuckDB queries (kv_metadata, parquet_metadata).
- * For partitioned sources, fetches a meta.json file listing partitions + extents.
+ * @typedef {[number, number, number, number]} Bbox
+ * [minx, miny, maxx, maxy] in WGS84.
  */
-export class DefaultMetadataProvider extends MetadataProvider {
+
+/**
+ * Metadata provider for GeoParquet sources.
+ * Reads parquet metadata via DuckDB queries (kv_metadata, parquet_metadata).
+ * Override getPartitions/getExtents/getParquetUrls for partition-aware sources.
+ */
+export class MetadataProvider {
   constructor() {
-    super();
-    /** @type {Map<string, object>} */
-    this._metaJsonCache = new Map();
-    /** @type {Map<string, string[]>} */
-    this._partitionCache = new Map();
-    /** @type {Map<string, import('./provider.js').Bbox | null>} */
+    /** @type {Map<string, Bbox | null>} */
     this._bboxCache = new Map();
     /** @type {Map<string, object | null>} */
     this._rgBboxCache = new Map();
   }
 
   /**
-   * Get the meta.json URL for a source.
-   * Default: appends '.meta.json' to the parquet URL from getParquetUrl().
-   * Override this to change how meta.json URLs are resolved.
+   * Transform a source URL to a single parquet URL.
+   * Default: returns sourceUrl as-is (assumes it is already a parquet URL).
+   * Override to handle custom URL schemes (e.g., .pmtiles → .parquet).
    * @param {string} sourceUrl
    * @returns {string}
    */
-  getMetaJsonUrl(sourceUrl) {
-    return this.getParquetUrl(sourceUrl) + '.meta.json';
+  getParquetUrl(sourceUrl) {
+    return sourceUrl;
   }
 
-  /** @override */
+  /**
+   * Get the base directory URL (everything up to and including the last /).
+   * @param {string} sourceUrl
+   * @returns {string}
+   */
+  getBaseUrl(sourceUrl) {
+    const lastSlash = sourceUrl.lastIndexOf('/');
+    return sourceUrl.substring(0, lastSlash + 1);
+  }
+
+  /**
+   * Get the list of partition filenames for a partitioned source.
+   * Default: returns null (no partitions). Override for partition-aware sources.
+   * @param {string} sourceUrl
+   * @returns {Promise<string[] | null>}
+   */
   async getPartitions(sourceUrl) {
-    const metaUrl = this.getMetaJsonUrl(sourceUrl);
-    if (this._partitionCache.has(metaUrl)) {
-      return this._partitionCache.get(metaUrl);
-    }
-    const metaJson = await this._fetchMetaJson(metaUrl);
-    if (!metaJson) return null;
-    return this._partitionCache.get(metaUrl);
+    return null;
   }
 
-  /** @override */
+  /**
+   * Get bounding boxes for each partition file.
+   * Default: returns null. Override for partition-aware sources.
+   * @param {string} sourceUrl
+   * @returns {Promise<Object<string, Bbox> | null>} { filename: [minx,miny,maxx,maxy] } or null
+   */
   async getExtents(sourceUrl) {
-    const metaUrl = this.getMetaJsonUrl(sourceUrl);
-    const metaJson = await this._fetchMetaJson(metaUrl);
-    return metaJson?.extents ?? null;
+    return null;
   }
 
-  /** @override */
+  /**
+   * Get the list of parquet URLs to query for a source, filtered by bbox.
+   * Default: returns single URL from getParquetUrl(). Override for partition filtering.
+   * @param {string} sourceUrl
+   * @param {boolean} [partitioned]
+   * @param {Bbox} [bbox]
+   * @returns {Promise<string[]>}
+   */
+  async getParquetUrls(sourceUrl, partitioned, bbox) {
+    return [this.getParquetUrl(sourceUrl)];
+  }
+
+  /**
+   * Get the overall bounding box for a single parquet source via DuckDB kv_metadata.
+   * @param {string} parquetUrl
+   * @param {import('./duckdb_adapter.js').DuckDBClient} duckdb
+   * @returns {Promise<Bbox | null>}
+   */
   async getBbox(parquetUrl, duckdb) {
     if (this._bboxCache.has(parquetUrl)) return this._bboxCache.get(parquetUrl);
     await duckdb.init();
@@ -84,7 +113,12 @@ export class DefaultMetadataProvider extends MetadataProvider {
     }
   }
 
-  /** @override */
+  /**
+   * Get per-row-group bounding boxes for a single parquet file.
+   * @param {string} parquetUrl
+   * @param {import('./duckdb_adapter.js').DuckDBClient} duckdb
+   * @returns {Promise<Object<string, Bbox> | null>} { rg_N: [minx,miny,maxx,maxy] } or null
+   */
   async getRowGroupBboxes(parquetUrl, duckdb) {
     const result = await this.getRowGroupBboxesMulti([parquetUrl], duckdb);
     if (!result) return null;
@@ -92,7 +126,12 @@ export class DefaultMetadataProvider extends MetadataProvider {
     return firstKey ? result[firstKey] : null;
   }
 
-  /** @override */
+  /**
+   * Get per-row-group bounding boxes for multiple parquet files in one call.
+   * @param {string[]} parquetUrls
+   * @param {import('./duckdb_adapter.js').DuckDBClient} duckdb
+   * @returns {Promise<Object<string, Object<string, Bbox>> | null>}
+   */
   async getRowGroupBboxesMulti(parquetUrls, duckdb) {
     if (!parquetUrls?.length) return null;
 
@@ -162,59 +201,7 @@ export class DefaultMetadataProvider extends MetadataProvider {
     }
   }
 
-  /** @override */
-  async getParquetUrls(sourceUrl, partitioned, bbox) {
-    if (!partitioned) {
-      return [this.getParquetUrl(sourceUrl)];
-    }
-
-    const metaUrl = this.getMetaJsonUrl(sourceUrl);
-    const metaJson = await this._fetchMetaJson(metaUrl);
-    if (!metaJson) return [this.getParquetUrl(sourceUrl)];
-
-    const baseUrl = this.getBaseUrl(sourceUrl);
-    const partitions = metaJson.extents ? Object.keys(metaJson.extents) : [];
-
-    if (!bbox || !metaJson.extents) {
-      return partitions.map(p => baseUrl + p);
-    }
-
-    // Filter partitions by bbox overlap
-    const [west, south, east, north] = bbox;
-    return partitions
-      .filter(p => {
-        const ext = metaJson.extents[p];
-        if (!ext || ext.length < 4) return true; // include if no extent info
-        const [pMinx, pMiny, pMaxx, pMaxy] = ext;
-        return pMinx <= east && pMaxx >= west && pMiny <= north && pMaxy >= south;
-      })
-      .map(p => baseUrl + p);
-  }
-
   // --- Internal helpers ---
-
-  async _fetchMetaJson(metaUrl) {
-    if (this._metaJsonCache.has(metaUrl)) {
-      return this._metaJsonCache.get(metaUrl);
-    }
-
-    try {
-      const proxied = proxyUrl(metaUrl);
-      const response = await fetch(proxied);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch meta.json: ${response.status}`);
-      }
-
-      const metaJson = await response.json();
-      this._metaJsonCache.set(metaUrl, metaJson);
-      const partitions = metaJson.extents ? Object.keys(metaJson.extents) : [];
-      this._partitionCache.set(metaUrl, partitions);
-      return metaJson;
-    } catch (error) {
-      console.error('Error fetching partition metadata:', error);
-      return null;
-    }
-  }
 
   async _getGeoMetadata(safeUrl, duckdb) {
     const result = await duckdb.conn.query(

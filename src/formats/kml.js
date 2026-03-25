@@ -4,7 +4,9 @@
 // Placemarks streamed as XML text to OPFS → KML header/footer wrapped at download.
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_KML_TMP, ScopedProgress, fileToAsyncBuffer, parseWkbHex } from '../utils.js';
+import { OPFS_PREFIX_KML_TMP, fileToAsyncBuffer } from '../utils.js';
+import { ScopedProgress } from '../scoped_progress.js';
+import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
 import { featureToPlacemark, KML_HEADER, KML_FOOTER } from './kml_writer.js';
