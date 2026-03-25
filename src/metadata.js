@@ -15,7 +15,7 @@ import { proxyUrl } from './proxy.js';
 /**
  * Metadata provider for GeoParquet sources.
  * Reads parquet metadata via DuckDB queries (kv_metadata, parquet_metadata).
- * Override getPartitions/getExtents/getParquetUrls for partition-aware sources.
+ * Override getExtents/getParquetUrls for partition-aware sources.
  */
 export class MetadataProvider {
   constructor() {
@@ -34,26 +34,6 @@ export class MetadataProvider {
    */
   getParquetUrl(sourceUrl) {
     return sourceUrl;
-  }
-
-  /**
-   * Get the base directory URL (everything up to and including the last /).
-   * @param {string} sourceUrl
-   * @returns {string}
-   */
-  getBaseUrl(sourceUrl) {
-    const lastSlash = sourceUrl.lastIndexOf('/');
-    return sourceUrl.substring(0, lastSlash + 1);
-  }
-
-  /**
-   * Get the list of partition filenames for a partitioned source.
-   * Default: returns null (no partitions). Override for partition-aware sources.
-   * @param {string} sourceUrl
-   * @returns {Promise<string[] | null>}
-   */
-  async getPartitions(sourceUrl) {
-    return null;
   }
 
   /**

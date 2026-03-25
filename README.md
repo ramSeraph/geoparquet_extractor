@@ -1,7 +1,5 @@
 # geoparquet-extractor
 
-> ⚠️ **Work in Progress** — API is unstable and may change without notice.
-
 [![npm version](https://img.shields.io/npm/v/geoparquet-extractor)](https://www.npmjs.com/package/geoparquet-extractor)
 [![GitHub release](https://img.shields.io/github/v/release/ramSeraph/geoparquet_extractor)](https://github.com/ramSeraph/geoparquet_extractor/releases/latest)
 
@@ -154,10 +152,10 @@ const extractor = new GeoParquetExtractor({
 Fetch partition and row-group bboxes as GeoJSON for map display:
 
 ```javascript
-import { ExtentData, DefaultMetadataProvider } from 'geoparquet-extractor';
+import { ExtentData, MetadataProvider } from 'geoparquet-extractor';
 
 const extentData = new ExtentData({
-  metadataProvider: new DefaultMetadataProvider(),
+  metadataProvider: new MetadataProvider(),
   duckdb: client,
 });
 
@@ -165,11 +163,8 @@ const { dataExtents, rgExtents } = await extentData.fetchExtents({
   sourceUrl: 'https://example.com/data.mosaic.json',
   partitioned: true,
 });
-
-// Convert to GeoJSON for map rendering
-const { polygons, labelPoints } = extentData.toGeoJSON(dataExtents);
-// polygons: FeatureCollection of bbox rectangles
-// labelPoints: FeatureCollection of label anchor points
+// dataExtents: { filename: [minx, miny, maxx, maxy] } or null
+// rgExtents: { filename: { rg_N: [minx, miny, maxx, maxy] } } or null
 ```
 
 ## API
@@ -179,11 +174,11 @@ const { polygons, labelPoints } = extentData.toGeoJSON(dataExtents);
 Main orchestrator class.
 
 - `constructor({ duckdb, metadataProvider?, gpkgWorkerUrl?, gpkgWorker?, memoryLimitMB? })`
-- `prepare(options)` → Returns format handler for inspection before download
-- `download(handler, { baseName, onProgress?, onStatus? })` → Execute download
-- `extract(options)` → Convenience: prepare + download in one call
+- `async prepare(options)` → Returns format handler for inspection before download
+- `async download(handler, { baseName, onProgress?, onStatus? })` → Execute download, returns `boolean`
+- `async extract(options)` → Convenience: prepare + download in one call
 - `cancel()` → Cancel in-flight download
-- `static cleanupOrphanedFiles()` → Clean up OPFS files from dead sessions
+- `static async cleanupOrphanedFiles()` → Clean up OPFS files from dead sessions
 - `static getDownloadBaseName(sourceName, bbox)` → Generate suggested filename
 
 ### `ExtentData`
@@ -191,22 +186,57 @@ Main orchestrator class.
 Data-fetching for partition/row-group bboxes.
 
 - `constructor({ metadataProvider, duckdb? })`
-- `fetchExtents({ sourceUrl, partitioned?, includeRowGroups?, onStatus? })` → `{ dataExtents, rgExtents }`
-- `toGeoJSON(extents)` → `{ polygons, labelPoints }`
+- `async fetchExtents({ sourceUrl, partitioned?, includeRowGroups?, onStatus? })` → `{ dataExtents, rgExtents }`
 
 ### `MetadataProvider`
 
-Abstract base class. Override to customize metadata resolution.
+Base class with working defaults. Override to customize metadata resolution.
 
-- `getParquetUrls(sourceUrl)` → `string[]`
-- `getExtents(sourceUrl)` → `{ filename: [minx, miny, maxx, maxy] }`
-- `getBbox(sourceUrl, duckdb)` → `[minx, miny, maxx, maxy]`
-- `getRowGroupBboxes(parquetUrl, duckdb)` → `{ rg_N: bbox }`
-- `getRowGroupBboxesMulti(urls, duckdb)` → `{ filename: { rg_N: bbox } }`
+- `getParquetUrl(sourceUrl)` → `string` — resolve source URL to parquet URL (default: identity)
+- `async getParquetUrls(sourceUrl)` → `string[]`
+- `async getExtents(sourceUrl)` → `{ filename: [minx, miny, maxx, maxy] }` or `null`
+- `async getBbox(parquetUrl, duckdb)` → `[minx, miny, maxx, maxy]` or `null`
+- `async getRowGroupBboxes(parquetUrl, duckdb)` → `{ rg_N: bbox }` or `null`
+- `async getRowGroupBboxesMulti(urls, duckdb)` → `{ filename: { rg_N: bbox } }` or `null`
 
 ### `createDuckDBClient(db, options?)`
 
 Wraps an `AsyncDuckDB` instance into the library's DuckDBClient interface.
+
+### `initDuckDB(duckdbDist, options?)`
+
+Creates a DuckDBClient by loading DuckDB-WASM from a distribution URL. Handles bundle selection, worker creation, and WASM instantiation.
+
+### `proxyUrl(url)`
+
+Returns the proxied version of a URL (complement to `setProxyUrl`).
+
+### Format Handlers
+
+Base class and per-format subclasses for advanced usage and subclassing. Normally you don't need these directly — `GeoParquetExtractor.prepare()` creates them for you.
+
+- **`FormatHandler`** — Base class. Manages OPFS file lifecycle, DuckDB queries, bbox filtering, and progress tracking.
+  - `getExpectedBrowserStorageUsage()` → Expected peak OPFS usage in bytes
+  - `getTotalExpectedDiskUsage()` → Total expected disk usage including downloads
+  - `getFormatWarning()` → Format-specific warning string, or `null`
+  - `getDownloadMap(baseName)` → List of downloadable files
+  - `async write(callbacks)` → Run the format handler's write pipeline
+  - `async triggerDownload(baseName, cleanupDelayMs?)` → Trigger browser download(s)
+  - `async cleanup()` → Clean up all OPFS files belonging to this session
+  - `cancel()` → Cancel the operation
+- **`CsvFormatHandler`** — CSV with WKT geometry column
+- **`GeoJsonFormatHandler`** — GeoJSON / GeoJSONSeq (`{ commaSeparated? }`)
+- **`GeoParquetFormatHandler`** — GeoParquet v1.1 or v2.0 (`{ version? }`)
+- **`GeoPackageFormatHandler`** — GeoPackage via wa-sqlite worker (`{ gpkgWorker? }`)
+- **`ShapefileFormatHandler`** — Shapefile (.shp/.dbf/.shx/.prj)
+- **`KmlFormatHandler`** — KML (Keyhole Markup Language)
+- **`DxfFormatHandler`** — DXF (AutoCAD R14, UTM projection)
+
+### Utilities
+
+- **`formatSize(bytes)`** → Human-readable string (e.g., `"1.5 MB"`)
+- **`async getStorageEstimate()`** → Browser storage quota and usage via `navigator.storage`
+- **`SizeGetter`** — Fetches and caches file sizes via HEAD requests through the configured proxy
 
 ## CORS Proxy
 

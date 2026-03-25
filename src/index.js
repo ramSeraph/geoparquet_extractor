@@ -26,10 +26,7 @@ export {
   setProxyUrl, proxyUrl,
 } from './proxy.js';
 export {
-  formatSize, getUtmZone, bboxUtmZone,
+  formatSize,
   getStorageEstimate,
-  OPFS_PREFIX_TMPDIR,
 } from './utils.js';
-export { ScopedProgress } from './scoped_progress.js';
 export { SizeGetter } from './size_getter.js';
-export { parseWkbHex } from './wkb.js';
