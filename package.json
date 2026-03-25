@@ -1,6 +1,6 @@
 {
   "name": "geoparquet-extractor",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Extract and convert spatial data from remote GeoParquet files. Supports bbox filtering, multiple output formats, and pluggable metadata providers.",
   "type": "module",
   "main": "dist/geoparquet-extractor.js",
