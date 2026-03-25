@@ -86,6 +86,7 @@ function extractSessionId(name) {
  * @property {number[]} bbox - [west, south, east, north] bounding box
  * @property {string} format - Output format (csv, geojson, geojsonseq, geoparquet, geoparquet2, geopackage, shapefile, kml, dxf)
  * @property {string} [baseName] - Base filename for download (without extension)
+ * @property {boolean} [flattenStructs] - Flatten STRUCT columns into separate columns
  * @property {(pct: number) => void} [onProgress] - Progress callback (0–100)
  * @property {(msg: string) => void} [onStatus] - Status message callback
  */
@@ -235,7 +236,7 @@ export class GeoParquetExtractor {
    * @returns {Promise<import('./formats/base.js').FormatHandler>}
    */
   async prepare(options) {
-    const { urls, sourceUrl, partitioned, bbox, format, onProgress, onStatus, memoryLimitMB } = options;
+    const { urls, sourceUrl, partitioned, bbox, format, flattenStructs, onProgress, onStatus, memoryLimitMB } = options;
 
     this._cancelled = false;
     this._cancelPromise = new Promise((_, reject) => {
@@ -287,6 +288,7 @@ export class GeoParquetExtractor {
       urls: resolvedUrls,
       bbox: bboxObj,
       estimatedBytes,
+      flattenStructs: flattenStructs ?? false,
     };
 
     // Pass gpkg worker config through if needed

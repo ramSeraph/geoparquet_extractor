@@ -19,10 +19,11 @@ export class CsvFormatHandler extends FormatHandler {
     );
 
     this.opfsPath = await this.createDuckdbOpfsFile(OPFS_PREFIX_OUTPUT, this.extension);
+    const columnSelect = await this.buildColumnSelect();
     try {
       await this.duckdb.conn.query(`
         COPY (
-          SELECT * EXCLUDE (geometry, bbox), ST_AsText(geometry) as geometry_wkt
+          SELECT ${columnSelect}, ST_AsText(geometry) as geometry_wkt
           FROM ${this.parquetSource}
           WHERE ${this.bboxFilter}
         ) TO '${this.opfsPath}' (FORMAT CSV, HEADER true)

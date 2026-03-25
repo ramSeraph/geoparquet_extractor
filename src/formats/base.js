@@ -17,16 +17,18 @@ function sleep(ms) {
  * @property {string[]} urls - Proxied parquet URLs to read from
  * @property {{ west: number, south: number, east: number, north: number }} bbox
  * @property {number | null} [estimatedBytes] - Estimated output size for progress
+ * @property {boolean} [flattenStructs] - Flatten STRUCT columns into separate columns
  */
 
 export class FormatHandler {
   /** @param {FormatHandlerOptions} opts */
-  constructor({ sessionId, duckdb, urls, bbox, estimatedBytes } = {}) {
+  constructor({ sessionId, duckdb, urls, bbox, estimatedBytes, flattenStructs } = {}) {
     this.sessionId = sessionId;
     this.duckdb = duckdb;
     this.urls = urls || [];
     this.bbox = bbox;
     this.estimatedBytes = estimatedBytes ?? null;
+    this.flattenStructs = flattenStructs ?? false;
     this._duckdbRegisteredPaths = new Set();
     this._prepared = false;
     this._downloadedFiles = new Set();
@@ -148,6 +150,33 @@ export class FormatHandler {
   }
 
   /**
+   * Build a SELECT column expression, optionally flattening STRUCT columns.
+   * @param {string[]} [excludeCols] - Columns to exclude
+   * @returns {Promise<string>} SQL column expression
+   */
+  async buildColumnSelect(excludeCols = ['geometry', 'bbox']) {
+    if (!this.flattenStructs) {
+      return `* EXCLUDE (${excludeCols.join(', ')})`;
+    }
+
+    const result = await this.duckdb.conn.query(
+      `SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM ${this.parquetSource})`
+    );
+    const parts = [];
+    for (let i = 0; i < result.numRows; i++) {
+      const name = result.getChildAt(0).get(i);
+      const type = result.getChildAt(1).get(i);
+      if (excludeCols.includes(name)) continue;
+      if (type.startsWith('STRUCT')) {
+        parts.push(`"${name}".*`);
+      } else {
+        parts.push(`"${name}"`);
+      }
+    }
+    return parts.join(', ');
+  }
+
+  /**
    * Create an intermediate parquet file on OPFS with WKB geometry from the remote source.
    * @param {Object} opts
    * @param {string} opts.prefix - OPFS filename prefix
@@ -166,12 +195,13 @@ export class FormatHandler {
     const extraSelect = extraColumns?.length
       ? extraColumns.join(', ') + ', '
       : '';
+    const columnSelect = await this.buildColumnSelect();
     try {
       await this.duckdb.conn.query(`
         COPY (
           SELECT
             hex(ST_AsWKB(geometry)::BLOB) AS geom_wkb,
-            ${extraSelect}* EXCLUDE (geometry, bbox)
+            ${extraSelect}${columnSelect}
           FROM ${this.parquetSource}
           WHERE ${this.bboxFilter}
         ) TO '${tempPath}' (FORMAT PARQUET, COMPRESSION ZSTD)
