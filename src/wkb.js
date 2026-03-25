@@ -1,4 +1,7 @@
 // WKB hex → GeoJSON-style geometry objects
+// Only XY coordinates are extracted; Z and M dimensions are present in some WKB
+// variants (PointZ=1001, PointM=2001, PointZM=3001, etc.) but are skipped during
+// reading since downstream formats (Shapefile, KML, DXF) only use 2D coordinates.
 
 function hexToBytes(hex) {
   const bytes = new Uint8Array(hex.length / 2);
@@ -15,7 +18,8 @@ function readCoord(view, offset, le, coordSize) {
 
 function readPoint(view, offset, le, coordSize) {
   const { coord, offset: newOffset } = readCoord(view, offset, le, coordSize);
-  return { geom: { type: 'Point', coordinates: coord }, offset: newOffset };
+  const empty = isNaN(coord[0]) && isNaN(coord[1]);
+  return { geom: { type: 'Point', coordinates: empty ? [] : coord }, offset: newOffset };
 }
 
 function readLineString(view, offset, le, coordSize) {
@@ -84,16 +88,29 @@ function readMultiPolygon(view, offset, le, coordSize) {
   return { geom: { type: 'MultiPolygon', coordinates: coords }, offset };
 }
 
+function readGeometryCollection(view, offset, le) {
+  const numGeoms = le ? view.getUint32(offset, true) : view.getUint32(offset, false);
+  offset += 4;
+  const geometries = [];
+  for (let i = 0; i < numGeoms; i++) {
+    const { geom, offset: newOffset } = readGeometry(view, offset);
+    geometries.push(geom);
+    offset = newOffset;
+  }
+  return { geom: { type: 'GeometryCollection', geometries }, offset };
+}
+
 function readGeometry(view, offset) {
   const le = view.getUint8(offset) === 1;
   offset += 1;
   const rawType = le ? view.getUint32(offset, true) : view.getUint32(offset, false);
   offset += 4;
 
-  // Handle ISO WKB type codes (base + Z/M/ZM offsets in thousands)
+  // ISO WKB type codes: base + 1000 (Z), + 2000 (M), + 3000 (ZM)
   const baseType = rawType % 1000;
-  const hasZ = rawType >= 1000 && rawType < 2000 || rawType >= 3000;
-  const coordSize = hasZ ? 3 : 2;
+  const hasZ = (rawType >= 1000 && rawType < 2000) || rawType >= 3000;
+  const hasM = rawType >= 2000;
+  const coordSize = 2 + (hasZ ? 1 : 0) + (hasM ? 1 : 0);
 
   switch (baseType) {
     case 1: return readPoint(view, offset, le, coordSize);
@@ -102,13 +119,15 @@ function readGeometry(view, offset) {
     case 4: return readMultiPoint(view, offset, le, coordSize);
     case 5: return readMultiLineString(view, offset, le, coordSize);
     case 6: return readMultiPolygon(view, offset, le, coordSize);
-    default: return { geom: { type: 'Unknown', coordinates: [] }, offset };
+    case 7: return readGeometryCollection(view, offset, le);
+    default: throw new Error('Unsupported WKB geometry type: ' + rawType);
   }
 }
 
 /**
  * Parse a WKB geometry (as hex string) into { type, coordinates }.
- * Supports Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon.
+ * Supports Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon,
+ * and GeometryCollection. Z and M coordinates are skipped (only XY output).
  * @param {string} hex
  * @returns {{ type: string, coordinates: any }}
  */

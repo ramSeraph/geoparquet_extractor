@@ -70,6 +70,58 @@ describe('parseWkbHex', () => {
     expect(geom.coordinates[0]).toBeCloseTo(1.0);
     expect(geom.coordinates[1]).toBeCloseTo(2.0);
   });
+
+  it('parses a WKB PointZ, returning only XY', () => {
+    // Type 1001 = Point Z, LE: x=1.0, y=2.0, z=3.0
+    const hex = '01E9030000000000000000F03F00000000000000400000000000000840';
+    const geom = parseWkbHex(hex);
+    expect(geom.type).toBe('Point');
+    expect(geom.coordinates).toEqual([1.0, 2.0]);
+  });
+
+  it('parses a WKB PointM, returning only XY', () => {
+    // Type 2001 = Point M, LE: x=1.0, y=2.0, m=99.0
+    const hex = '01D1070000000000000000F03F00000000000000400000000000C05840';
+    const geom = parseWkbHex(hex);
+    expect(geom.type).toBe('Point');
+    expect(geom.coordinates).toEqual([1.0, 2.0]);
+  });
+
+  it('parses a WKB PointZM, returning only XY', () => {
+    // Type 3001 = Point ZM, LE: x=1.0, y=2.0, z=3.0, m=4.0
+    const hex = '01B90B0000000000000000F03F000000000000004000000000000008400000000000001040';
+    const geom = parseWkbHex(hex);
+    expect(geom.type).toBe('Point');
+    expect(geom.coordinates).toEqual([1.0, 2.0]);
+  });
+
+  it('parses a GeometryCollection', () => {
+    // GeometryCollection containing Point(1,2) and Point(3,4)
+    const hex =
+      '0107000000' +       // GC header, 2 geoms
+      '02000000' +
+      '0101000000000000000000F03F0000000000000040' + // Point(1,2)
+      '010100000000000000000008400000000000001040';   // Point(3,4)
+    const geom = parseWkbHex(hex);
+    expect(geom.type).toBe('GeometryCollection');
+    expect(geom.geometries).toHaveLength(2);
+    expect(geom.geometries[0]).toEqual({ type: 'Point', coordinates: [1.0, 2.0] });
+    expect(geom.geometries[1]).toEqual({ type: 'Point', coordinates: [3.0, 4.0] });
+  });
+
+  it('parses an empty WKB Point (NaN coords) as empty array', () => {
+    // Point with NaN x/y (empty geometry convention)
+    const hex = '0101000000000000000000F87F000000000000F87F';
+    const geom = parseWkbHex(hex);
+    expect(geom.type).toBe('Point');
+    expect(geom.coordinates).toEqual([]);
+  });
+
+  it('throws on unsupported geometry type', () => {
+    // Type 15 = unsupported
+    const hex = '01' + '0F000000' + '0000000000000000';
+    expect(() => parseWkbHex(hex)).toThrow('Unsupported WKB geometry type');
+  });
 });
 
 describe('getUtmZone', () => {
