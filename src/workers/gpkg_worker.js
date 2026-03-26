@@ -170,10 +170,13 @@ async function writeFromParquet({ parquetFileName, gpkgFileName }, msgId) {
   for (const child of schema.children) {
     if (INTERNAL_COLS.has(child.element.name)) continue;
     const isNested = child.children?.length > 0;
+    const isList = child.element.converted_type === 'LIST' ||
+      child.element.logical_type?.type === 'LIST';
     columns.push({
       name: child.element.name,
       sqliteType: isNested ? 'TEXT' : parquetTypeToSqlite(child.element),
       jsonSerialize: isNested,
+      isList,
     });
   }
 
@@ -324,14 +327,12 @@ async function writeFromParquet({ parquetFileName, gpkgFileName }, msgId) {
           const raw = row[attrIndices[ci]];
           const val = coerceValue(raw);
           if (columns[ci].jsonSerialize && val != null) {
-            const serialized = JSON.stringify(val);
-            if (serialized === '{}') {
-              console.warn('[gpkg_worker] empty object for column', columns[ci].name,
-                '| raw:', raw, '| Array.isArray(raw):', Array.isArray(raw),
-                '| typeof raw:', typeof raw, '| constructor:', raw?.constructor?.name,
-                '| coerced:', val);
+            // hyparquet returns empty lists as {} (plain Object) — normalize to []
+            if (columns[ci].isList && !Array.isArray(val) && typeof val === 'object' && Object.keys(val).length === 0) {
+              params.push('[]');
+            } else {
+              params.push(JSON.stringify(val));
             }
-            params.push(serialized);
           } else {
             params.push(val);
           }
