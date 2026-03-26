@@ -3,9 +3,37 @@
 [![npm version](https://img.shields.io/npm/v/geoparquet-extractor)](https://www.npmjs.com/package/geoparquet-extractor)
 [![GitHub release](https://img.shields.io/github/v/release/ramSeraph/geoparquet_extractor)](https://github.com/ramSeraph/geoparquet_extractor/releases/latest)
 
-Extract and convert spatial data from remote GeoParquet files in the browser. Supports bbox filtering, multiple output formats, and pluggable metadata providers.
+Extract and convert spatial data from remote GeoParquet files entirely in the browser, using OPFS (Origin Private File System) for temporary storage and spill-over. Supports bbox filtering, multiple output formats, and pluggable metadata providers.
 
 > **Browser-only** — requires Origin Private File System (OPFS), Web Workers, and Web Locks APIs.
+
+## How It Works
+
+The library queries remote GeoParquet files using HTTP range requests — only the data matching the requested bounding box is transferred. All processing happens client-side with no backend involved.
+
+```
+Browser
+  ├─ DuckDB-WASM
+  │   ├─ HTTP range requests → remote GeoParquet
+  │   ├─ Spatial filtering by bounding box
+  │   ├─ OPFS temp directory for spill-over
+  │   └─ COPY TO OPFS (intermediate or final output)
+  └─ GeoPackage Worker (for .gpkg only)
+      ├─ hyparquet (reads intermediate parquet from OPFS)
+      └─ wa-sqlite/sqwab (writes .gpkg with R-tree index to OPFS)
+```
+
+### Key Internal Dependencies
+
+- **DuckDB-WASM with OPFS temp directory** — uses [duckdb-wasm-opfs-tempdir](https://www.npmjs.com/package/duckdb-wasm-opfs-tempdir) which supports `SET temp_directory = 'opfs://...'` for processing datasets larger than available memory. DuckDB's `spatial` extension is loaded at runtime for geometry operations (`ST_AsWKB`, `ST_AsGeoJSON`, `ST_Hilbert`, etc.).
+- **[sqwab](https://github.com/ramSeraph/sqwab)** — wa-sqlite with R-tree support for GeoPackage output. Runs in a dedicated Web Worker using `OPFSAdaptiveVFS` for file I/O.
+- **[hyparquet](https://github.com/hyparam/hyparquet)** — pure-JS parquet reader used in the GeoPackage worker to read intermediate files from OPFS.
+- **[Apache Arrow](https://arrow.apache.org/)** — columnar data handling.
+
+## Used By
+
+- **[Indian Open Maps](https://indianopenmaps.com/)** — extract Indian geospatial datasets
+- **[OSM Layercake Extract](https://ramseraph.github.io/osm-layercake-extract/)** — extract OpenStreetMap data from OSMUS Layercake datasets
 
 ## Installation
 
