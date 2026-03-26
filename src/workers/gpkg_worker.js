@@ -4,7 +4,7 @@
 
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
-import { coerceValue } from '../utils.js';
+import { buildNormalizer } from '../normalizer.js';
 import SQLiteESMFactory from 'wa-sqlite-rtree/dist/wa-sqlite-async.mjs';
 import * as SQLite from 'wa-sqlite-rtree/src/sqlite-api.js';
 import { OPFSAdaptiveVFS } from 'wa-sqlite-rtree/src/examples/OPFSAdaptiveVFS.js';
@@ -170,13 +170,11 @@ async function writeFromParquet({ parquetFileName, gpkgFileName }, msgId) {
   for (const child of schema.children) {
     if (INTERNAL_COLS.has(child.element.name)) continue;
     const isNested = child.children?.length > 0;
-    const isList = child.element.converted_type === 'LIST' ||
-      child.element.logical_type?.type === 'LIST';
     columns.push({
       name: child.element.name,
       sqliteType: isNested ? 'TEXT' : parquetTypeToSqlite(child.element),
       jsonSerialize: isNested,
-      isList,
+      normalize: buildNormalizer(child),
     });
   }
 
@@ -324,15 +322,9 @@ async function writeFromParquet({ parquetFileName, gpkgFileName }, msgId) {
           row[iMinX], row[iMinY], row[iMaxX], row[iMaxY],
         ];
         for (let ci = 0; ci < attrIndices.length; ci++) {
-          const raw = row[attrIndices[ci]];
-          const val = coerceValue(raw);
+          const val = columns[ci].normalize(row[attrIndices[ci]]);
           if (columns[ci].jsonSerialize && val != null) {
-            // hyparquet returns empty lists as {} (plain Object) — normalize to []
-            if (columns[ci].isList && !Array.isArray(val) && typeof val === 'object' && Object.keys(val).length === 0) {
-              params.push('[]');
-            } else {
-              params.push(JSON.stringify(val));
-            }
+            params.push(JSON.stringify(val));
           } else {
             params.push(val);
           }

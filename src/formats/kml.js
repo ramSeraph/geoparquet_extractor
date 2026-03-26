@@ -4,7 +4,8 @@
 // Placemarks streamed as XML text to OPFS → KML header/footer wrapped at download.
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_KML_TMP, fileToAsyncBuffer, coerceValue } from '../utils.js';
+import { OPFS_PREFIX_KML_TMP, fileToAsyncBuffer } from '../utils.js';
+import { buildNormalizer } from '../normalizer.js';
 import { ScopedProgress } from '../scoped_progress.js';
 import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
@@ -53,6 +54,7 @@ export class KmlFormatHandler extends FormatHandler {
     hSchema.children.forEach((child, i) => { colIndex[child.element.name] = i; });
     const iWkb = colIndex['geom_wkb'];
     const attrIndices = attrColumns.map(c => colIndex[c.originalName]);
+    const attrNorms = attrColumns.map(c => buildNormalizer(hSchema.children[colIndex[c.originalName]]));
 
     // Open OPFS writable stream for Placemark body
     const bodyName = `${OPFS_PREFIX_KML_TMP}${this.sessionId}_${Date.now()}.kml.body`;
@@ -84,7 +86,7 @@ export class KmlFormatHandler extends FormatHandler {
           const geom = parseWkbHex(wkbHex);
           const props = {};
           for (let ci = 0; ci < attrIndices.length; ci++) {
-            const val = coerceValue(row[attrIndices[ci]]);
+            const val = attrNorms[ci](row[attrIndices[ci]]);
             props[attrColumns[ci].originalName] = val != null && typeof val === 'object'
               ? JSON.stringify(val) : val;
           }

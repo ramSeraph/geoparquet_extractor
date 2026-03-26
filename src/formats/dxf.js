@@ -4,7 +4,8 @@
 // DXF entities streamed to OPFS → header/tables/footer wrapped at download.
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_DXF_TMP, bboxUtmZone, fileToAsyncBuffer, coerceValue } from '../utils.js';
+import { OPFS_PREFIX_DXF_TMP, bboxUtmZone, fileToAsyncBuffer } from '../utils.js';
+import { buildNormalizer } from '../normalizer.js';
 import { ScopedProgress } from '../scoped_progress.js';
 import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
@@ -71,6 +72,7 @@ export class DxfFormatHandler extends FormatHandler {
     hSchema.children.forEach((child, i) => { colIndex[child.element.name] = i; });
     const iWkb = colIndex['geom_wkb'];
     const attrIndices = attrColumns.map(c => colIndex[c.originalName]);
+    const attrNorms = attrColumns.map(c => buildNormalizer(hSchema.children[colIndex[c.originalName]]));
 
     // Open OPFS writable stream for entity body
     const bodyName = `${OPFS_PREFIX_DXF_TMP}${this.sessionId}_${Date.now()}.dxf.body`;
@@ -104,7 +106,7 @@ export class DxfFormatHandler extends FormatHandler {
           const geom = parseWkbHex(wkbHex);
           const props = {};
           for (let ci = 0; ci < attrIndices.length; ci++) {
-            const val = coerceValue(row[attrIndices[ci]]);
+            const val = attrNorms[ci](row[attrIndices[ci]]);
             props[attrColumns[ci].originalName] = val != null && typeof val === 'object'
               ? JSON.stringify(val) : val;
           }

@@ -4,7 +4,8 @@
 // record data streamed to OPFS → headers prepended at download time.
 
 import { FormatHandler } from './base.js';
-import { OPFS_PREFIX_SHP_TMP, fileToAsyncBuffer, formatSize, coerceValue } from '../utils.js';
+import { OPFS_PREFIX_SHP_TMP, fileToAsyncBuffer, formatSize } from '../utils.js';
+import { buildNormalizer } from '../normalizer.js';
 import { ScopedProgress } from '../scoped_progress.js';
 import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
@@ -104,6 +105,7 @@ export class ShapefileFormatHandler extends FormatHandler {
     const iWkb = colIndex['geom_wkb'];
     const iGeomType = colIndex['_geom_type'];
     const attrIndices = attrColumns.map(c => colIndex[c.originalName]);
+    const attrNorms = attrColumns.map(c => buildNormalizer(hSchema.children[colIndex[c.originalName]]));
 
     // Create writers for each shapefile type
     const writers = {};
@@ -163,7 +165,7 @@ export class ShapefileFormatHandler extends FormatHandler {
 
           const props = {};
           for (let ci = 0; ci < attrIndices.length; ci++) {
-            const val = coerceValue(row[attrIndices[ci]]);
+            const val = attrNorms[ci](row[attrIndices[ci]]);
             props[dbfFields[ci].originalName] = val != null && typeof val === 'object' ? JSON.stringify(val) : val;
           }
           dbf.writeRecord(props);
