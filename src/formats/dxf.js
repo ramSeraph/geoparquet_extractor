@@ -5,12 +5,12 @@
 
 import { FormatHandler } from './base.js';
 import { OPFS_PREFIX_DXF_TMP, bboxUtmZone, fileToAsyncBuffer } from '../utils.js';
-import { buildNormalizer } from '../normalizer.js';
 import { ScopedProgress } from '../scoped_progress.js';
 import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
 import { featureToDxfEntities, buildDxfEnvelope, createUtmTransform } from './dxf_writer.js';
+import { buildColumnLookup, buildRowProperties } from './streaming_helpers.js';
 
 const INTERNAL_COLS = new Set(['geom_wkb']);
 
@@ -68,11 +68,7 @@ export class DxfFormatHandler extends FormatHandler {
     const metadata = await parquetMetadataAsync(asyncBuffer);
 
     const hSchema = parquetSchema(metadata);
-    const colIndex = {};
-    hSchema.children.forEach((child, i) => { colIndex[child.element.name] = i; });
-    const iWkb = colIndex['geom_wkb'];
-    const attrIndices = attrColumns.map(c => colIndex[c.originalName]);
-    const attrNorms = attrColumns.map(c => buildNormalizer(hSchema.children[colIndex[c.originalName]]));
+    const { iWkb, attrIndices, attrNorms } = buildColumnLookup(hSchema, attrColumns);
 
     // Open OPFS writable stream for entity body
     const bodyName = `${OPFS_PREFIX_DXF_TMP}${this.sessionId}_${Date.now()}.dxf.body`;
@@ -104,12 +100,7 @@ export class DxfFormatHandler extends FormatHandler {
           if (!wkbHex) continue;
 
           const geom = parseWkbHex(wkbHex);
-          const props = {};
-          for (let ci = 0; ci < attrIndices.length; ci++) {
-            const val = attrNorms[ci](row[attrIndices[ci]]);
-            props[attrColumns[ci].originalName] = val != null && typeof val === 'object'
-              ? JSON.stringify(val) : val;
-          }
+          const props = buildRowProperties(row, attrIndices, attrNorms, attrColumns);
 
           const { dxf, layerName } = featureToDxfEntities(geom, props, transform);
           if (dxf) {
@@ -126,7 +117,7 @@ export class DxfFormatHandler extends FormatHandler {
         rowOffset = rgEnd;
       }
     } finally {
-      try { await bodyStream.close(); } catch (e) { /* may already be closed */ }
+      try { await bodyStream.close(); } catch (e) { /* may already be closed */ } // eslint-disable-line no-unused-vars
     }
 
     this._bodyName = bodyName;

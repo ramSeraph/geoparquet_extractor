@@ -6,7 +6,7 @@
 function hexToBytes(hex) {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2)
-    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
   return bytes;
 }
 
@@ -52,41 +52,23 @@ function readPolygon(view, offset, le, coordSize) {
   return { geom: { type: 'Polygon', coordinates: rings }, offset };
 }
 
-function readMultiPoint(view, offset, le, coordSize) {
-  const numGeoms = le ? view.getUint32(offset, true) : view.getUint32(offset, false);
-  offset += 4;
-  const coords = [];
-  for (let i = 0; i < numGeoms; i++) {
-    const { geom, offset: newOffset } = readGeometry(view, offset);
-    coords.push(geom.coordinates);
-    offset = newOffset;
-  }
-  return { geom: { type: 'MultiPoint', coordinates: coords }, offset };
+function readMulti(typeName) {
+  return function (view, offset, le, _coordSize) {
+    const numGeoms = le ? view.getUint32(offset, true) : view.getUint32(offset, false);
+    offset += 4;
+    const coords = [];
+    for (let i = 0; i < numGeoms; i++) {
+      const { geom, offset: newOffset } = readGeometry(view, offset);
+      coords.push(geom.coordinates);
+      offset = newOffset;
+    }
+    return { geom: { type: typeName, coordinates: coords }, offset };
+  };
 }
 
-function readMultiLineString(view, offset, le, coordSize) {
-  const numGeoms = le ? view.getUint32(offset, true) : view.getUint32(offset, false);
-  offset += 4;
-  const coords = [];
-  for (let i = 0; i < numGeoms; i++) {
-    const { geom, offset: newOffset } = readGeometry(view, offset);
-    coords.push(geom.coordinates);
-    offset = newOffset;
-  }
-  return { geom: { type: 'MultiLineString', coordinates: coords }, offset };
-}
-
-function readMultiPolygon(view, offset, le, coordSize) {
-  const numGeoms = le ? view.getUint32(offset, true) : view.getUint32(offset, false);
-  offset += 4;
-  const coords = [];
-  for (let i = 0; i < numGeoms; i++) {
-    const { geom, offset: newOffset } = readGeometry(view, offset);
-    coords.push(geom.coordinates);
-    offset = newOffset;
-  }
-  return { geom: { type: 'MultiPolygon', coordinates: coords }, offset };
-}
+const readMultiPoint = readMulti('MultiPoint');
+const readMultiLineString = readMulti('MultiLineString');
+const readMultiPolygon = readMulti('MultiPolygon');
 
 function readGeometryCollection(view, offset, le) {
   const numGeoms = le ? view.getUint32(offset, true) : view.getUint32(offset, false);

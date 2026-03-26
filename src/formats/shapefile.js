@@ -5,7 +5,6 @@
 
 import { FormatHandler } from './base.js';
 import { OPFS_PREFIX_SHP_TMP, fileToAsyncBuffer, formatSize } from '../utils.js';
-import { buildNormalizer } from '../normalizer.js';
 import { ScopedProgress } from '../scoped_progress.js';
 import { parseWkbHex } from '../wkb.js';
 import { parquetRead, parquetMetadataAsync, parquetSchema } from 'hyparquet';
@@ -15,6 +14,7 @@ import {
   ShpWriter, DbfWriter,
   PRJ_WGS84, SHP_TYPE_LABELS, SHP_MAX_FILE_BYTES,
 } from './shp_writer.js';
+import { buildColumnLookup, buildRowProperties } from './streaming_helpers.js';
 
 // DuckDB type name → DBF field type
 function duckdbTypeToDbf(type) {
@@ -30,9 +30,6 @@ function duckdbTypeToDbf(type) {
 const INTERNAL_COLS = new Set(['geom_wkb', '_geom_type']);
 
 export class ShapefileFormatHandler extends FormatHandler {
-  constructor(opts = {}) {
-    super(opts);
-  }
 
   getExpectedBrowserStorageUsage() { return this.estimatedBytes * 2.5; }
   getTotalExpectedDiskUsage() { return this.estimatedBytes * 3; }
@@ -100,12 +97,8 @@ export class ShapefileFormatHandler extends FormatHandler {
 
     // Pre-compute column indices from hyparquet schema
     const hSchema = parquetSchema(metadata);
-    const colIndex = {};
-    hSchema.children.forEach((child, i) => { colIndex[child.element.name] = i; });
-    const iWkb = colIndex['geom_wkb'];
+    const { colIndex, iWkb, attrIndices, attrNorms } = buildColumnLookup(hSchema, attrColumns);
     const iGeomType = colIndex['_geom_type'];
-    const attrIndices = attrColumns.map(c => colIndex[c.originalName]);
-    const attrNorms = attrColumns.map(c => buildNormalizer(hSchema.children[colIndex[c.originalName]]));
 
     // Create writers for each shapefile type
     const writers = {};
@@ -163,11 +156,7 @@ export class ShapefileFormatHandler extends FormatHandler {
           const { shp, dbf } = writers[mapping.shpType];
           shp.writeRecord(geom);
 
-          const props = {};
-          for (let ci = 0; ci < attrIndices.length; ci++) {
-            const val = attrNorms[ci](row[attrIndices[ci]]);
-            props[dbfFields[ci].originalName] = val != null && typeof val === 'object' ? JSON.stringify(val) : val;
-          }
+          const props = buildRowProperties(row, attrIndices, attrNorms, dbfFields);
           dbf.writeRecord(props);
         }
 
@@ -186,8 +175,8 @@ export class ShapefileFormatHandler extends FormatHandler {
       }
     } finally {
       for (const { shpStream, dbfStream } of Object.values(opfsStreams)) {
-        try { await shpStream.close(); } catch (e) { /* may already be closed */ }
-        try { await dbfStream.close(); } catch (e) { /* may already be closed */ }
+        try { await shpStream.close(); } catch (e) { /* may already be closed */ } // eslint-disable-line no-unused-vars
+        try { await dbfStream.close(); } catch (e) { /* may already be closed */ } // eslint-disable-line no-unused-vars
       }
     }
 

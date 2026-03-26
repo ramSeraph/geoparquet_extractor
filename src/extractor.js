@@ -401,7 +401,7 @@ export class GeoParquetExtractor {
           try {
             await root.removeEntry(name, { recursive: handle.kind === 'directory' });
             count++;
-          } catch (e) { /* may be locked or already removed */ }
+          } catch (e) { /* may be locked or already removed */ } // eslint-disable-line no-unused-vars
         }
       }
 

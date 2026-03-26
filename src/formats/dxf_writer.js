@@ -14,7 +14,6 @@ const UTM_K0 = 0.9996;
 
 const DEG2RAD = Math.PI / 180;
 
-import { getUtmZone, bboxUtmZone } from '../utils.js';
 
 /**
  * Convert a single WGS 84 coordinate [lon, lat, alt?] to UTM [easting, northing, alt].

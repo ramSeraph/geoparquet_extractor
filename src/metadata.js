@@ -42,7 +42,7 @@ export class MetadataProvider {
    * @param {string} sourceUrl
    * @returns {Promise<Object<string, Bbox> | null>} { filename: [minx,miny,maxx,maxy] } or null
    */
-  async getExtents(sourceUrl) {
+  async getExtents(_sourceUrl) {
     return null;
   }
 
@@ -54,7 +54,7 @@ export class MetadataProvider {
    * @param {Bbox} [bbox]
    * @returns {Promise<string[]>}
    */
-  async getParquetUrls(sourceUrl, partitioned, bbox) {
+  async getParquetUrls(sourceUrl, _partitioned, _bbox) {
     return [this.getParquetUrl(sourceUrl)];
   }
 
@@ -150,17 +150,23 @@ export class MetadataProvider {
       const rows = queryResult.toArray();
       if (rows.length === 0) { this._rgBboxCache.set(cacheKey, null); return null; }
 
+      const pathToField = {
+        [xminPath]: ['xmin', 'stats_min'],
+        [yminPath]: ['ymin', 'stats_min'],
+        [xmaxPath]: ['xmax', 'stats_max'],
+        [ymaxPath]: ['ymax', 'stats_max'],
+      };
+
       const fileGroups = {};
       for (const row of rows) {
         const fileName = proxyToFilename[row.file_name] || row.file_name;
         if (!fileGroups[fileName]) fileGroups[fileName] = {};
         const rgId = Number(row.row_group_id);
         if (!fileGroups[fileName][rgId]) fileGroups[fileName][rgId] = {};
-        const path = row.path_in_schema;
-        if (path === xminPath) fileGroups[fileName][rgId].xmin = Number(row.stats_min);
-        if (path === yminPath) fileGroups[fileName][rgId].ymin = Number(row.stats_min);
-        if (path === xmaxPath) fileGroups[fileName][rgId].xmax = Number(row.stats_max);
-        if (path === ymaxPath) fileGroups[fileName][rgId].ymax = Number(row.stats_max);
+        const mapping = pathToField[row.path_in_schema];
+        if (mapping) {
+          fileGroups[fileName][rgId][mapping[0]] = Number(row[mapping[1]]);
+        }
       }
 
       const allExtents = {};

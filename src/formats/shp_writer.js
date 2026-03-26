@@ -25,7 +25,6 @@ export function promoteGeometry(geom) {
 
 export function resolveShpTypeMapping(duckdbGeomTypes) {
   const typeMapping = new Map();
-  const hasPoint = duckdbGeomTypes.has('POINT');
   const hasMultiPoint = duckdbGeomTypes.has('MULTIPOINT');
 
   for (const t of duckdbGeomTypes) {

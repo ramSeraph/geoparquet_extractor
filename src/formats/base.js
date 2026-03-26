@@ -160,17 +160,17 @@ export class FormatHandler {
     try {
       const root = await this._getRoot();
       await root.removeEntry(opfsFileName);
-    } catch (e) { /* may already be cleaned up */ }
+    } catch (e) { /* may already be cleaned up */ } // eslint-disable-line no-unused-vars
   }
 
   async releaseDuckdbOpfsFile(opfsFileName) {
     try {
       await this.duckdb.db.dropFile(opfsFileName);
-    } catch (e) { /* db terminated or file already gone */ }
+    } catch (e) { /* db terminated or file already gone */ } // eslint-disable-line no-unused-vars
     this._duckdbRegisteredPaths.delete(opfsFileName);
   }
 
-  async releaseDuckDbOpfsFiles() {
+  async releaseDuckdbOpfsFiles() {
     const paths = Array.from(this._duckdbRegisteredPaths);
     for (const path of paths) {
       await this.releaseDuckdbOpfsFile(path);
@@ -280,7 +280,7 @@ export class FormatHandler {
    * @param {string} baseName
    * @returns {Promise<Array<{downloadName: string, blobParts: (Blob|File|Uint8Array)[]}>>}
    */
-  async getDownloadMap(baseName) {
+  async getDownloadMap(_baseName) {
     throw new Error('Not implemented');
   }
 
@@ -321,7 +321,7 @@ export class FormatHandler {
         URL.revokeObjectURL(url);
         const root = await this._getRoot();
         for (const name of opfsFiles) {
-          try { await root.removeEntry(name); } catch (e) { /* ignore */ }
+          try { await root.removeEntry(name); } catch (e) { /* ignore */ } // eslint-disable-line no-unused-vars
         }
       }, cleanupDelayMs);
 
@@ -337,7 +337,7 @@ export class FormatHandler {
     try {
       await this._write(callbacks);
     } finally {
-      await this.releaseDuckDbOpfsFiles();
+      await this.releaseDuckdbOpfsFiles();
     }
   }
 
@@ -356,7 +356,7 @@ export class FormatHandler {
       if (this._downloadedFiles.has(name)) continue;
       try {
         await root.removeEntry(name, { recursive: true });
-      } catch (e) { /* may already be cleaned up */ }
+      } catch (e) { /* may already be cleaned up */ } // eslint-disable-line no-unused-vars
     }
   }
 }
