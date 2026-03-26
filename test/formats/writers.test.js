@@ -5,6 +5,7 @@ import {
 } from '../../src/formats/shp_writer.js';
 import { geometryToKml, featureToPlacemark, KML_HEADER, KML_FOOTER } from '../../src/formats/kml_writer.js';
 import { createUtmTransform, featureToDxfEntities, buildDxfEnvelope } from '../../src/formats/dxf_writer.js';
+import { parseStructFieldNames } from '../../src/formats/base.js';
 
 describe('shp_writer', () => {
   describe('promoteGeometry', () => {
@@ -114,5 +115,37 @@ describe('dxf_writer', () => {
     expect(header).toContain('SECTION');
     expect(header).toContain('Layer1');
     expect(footer).toContain('EOF');
+  });
+});
+
+describe('parseStructFieldNames', () => {
+  it('parses simple STRUCT fields', () => {
+    expect(parseStructFieldNames('STRUCT(a INTEGER, b VARCHAR)'))
+      .toEqual(['a', 'b']);
+  });
+
+  it('parses single field', () => {
+    expect(parseStructFieldNames('STRUCT(name VARCHAR)'))
+      .toEqual(['name']);
+  });
+
+  it('handles nested STRUCT types without descending', () => {
+    expect(parseStructFieldNames('STRUCT(a STRUCT(x INTEGER, y INTEGER), b VARCHAR)'))
+      .toEqual(['a', 'b']);
+  });
+
+  it('handles quoted field names', () => {
+    expect(parseStructFieldNames('STRUCT("my field" INTEGER, b VARCHAR)'))
+      .toEqual(['my field', 'b']);
+  });
+
+  it('handles MAP and LIST types with commas inside parens', () => {
+    expect(parseStructFieldNames('STRUCT(tags MAP(VARCHAR, VARCHAR), count INTEGER)'))
+      .toEqual(['tags', 'count']);
+  });
+
+  it('handles many fields', () => {
+    expect(parseStructFieldNames('STRUCT(a INT, b INT, c INT, d INT, e INT)'))
+      .toEqual(['a', 'b', 'c', 'd', 'e']);
   });
 });

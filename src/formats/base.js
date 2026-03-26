@@ -11,6 +11,42 @@ function sleep(ms) {
 }
 
 /**
+ * Parse top-level field names from a DuckDB STRUCT type string.
+ * E.g. "STRUCT(a INTEGER, b VARCHAR)" → ["a", "b"]
+ * Handles nested types like "STRUCT(a STRUCT(x INT, y INT), b VARCHAR)"
+ * @param {string} structType
+ * @returns {string[]}
+ */
+function parseStructFieldNames(structType) {
+  const openParen = structType.indexOf('(');
+  const inner = structType.slice(openParen + 1, structType.lastIndexOf(')'));
+  const fields = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === ',' && depth === 0) {
+      fields.push(extractFieldName(inner.slice(start, i).trim()));
+      start = i + 1;
+    }
+  }
+  const last = inner.slice(start).trim();
+  if (last) fields.push(extractFieldName(last));
+  return fields;
+}
+
+/** @param {string} fieldDef e.g. 'a INTEGER' or '"my field" VARCHAR' */
+function extractFieldName(fieldDef) {
+  if (fieldDef.startsWith('"')) {
+    const endQuote = fieldDef.indexOf('"', 1);
+    return fieldDef.slice(1, endQuote);
+  }
+  return fieldDef.split(/\s+/)[0];
+}
+
+/**
  * @typedef {Object} FormatHandlerOptions
  * @property {string} sessionId - Unique session/tab ID for OPFS scoping
  * @property {import('../duckdb_adapter.js').DuckDBClient} duckdb
@@ -19,6 +55,8 @@ function sleep(ms) {
  * @property {number | null} [estimatedBytes] - Estimated output size for progress
  * @property {boolean} [flattenStructs] - Flatten STRUCT columns into separate columns
  */
+
+export { parseStructFieldNames };
 
 export class FormatHandler {
   /** @param {FormatHandlerOptions} opts */
@@ -168,7 +206,10 @@ export class FormatHandler {
       const type = result.getChildAt(1).get(i);
       if (excludeCols.includes(name)) continue;
       if (type.startsWith('STRUCT')) {
-        parts.push(`"${name}".*`);
+        const fieldNames = parseStructFieldNames(type);
+        for (const field of fieldNames) {
+          parts.push(`"${name}"."${field}" AS "${name}.${field}"`);
+        }
       } else {
         parts.push(`"${name}"`);
       }

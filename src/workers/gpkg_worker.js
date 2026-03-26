@@ -321,9 +321,17 @@ async function writeFromParquet({ parquetFileName, gpkgFileName }, msgId) {
           row[iMinX], row[iMinY], row[iMaxX], row[iMaxY],
         ];
         for (let ci = 0; ci < attrIndices.length; ci++) {
-          const val = coerceValue(row[attrIndices[ci]]);
+          const raw = row[attrIndices[ci]];
+          const val = coerceValue(raw);
           if (columns[ci].jsonSerialize && val != null) {
-            params.push(JSON.stringify(val));
+            const serialized = JSON.stringify(val);
+            if (serialized === '{}') {
+              console.warn('[gpkg_worker] empty object for column', columns[ci].name,
+                '| raw:', raw, '| Array.isArray(raw):', Array.isArray(raw),
+                '| typeof raw:', typeof raw, '| constructor:', raw?.constructor?.name,
+                '| coerced:', val);
+            }
+            params.push(serialized);
           } else {
             params.push(val);
           }
