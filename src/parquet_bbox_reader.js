@@ -83,25 +83,20 @@ export class ParquetBboxReader {
   /**
    * @param {{ id: string, url: string }[]} files
    * @param {import('./duckdb_adapter.js').DuckDBClient} duckdb
-   * @param {{ bboxColumn?: string }} [options]
+   * @param {{ bboxColumn?: string, signal?: AbortSignal, onStatus?: (msg: string) => void }} [options]
    * @returns {Promise<Record<string, Record<string, Bbox>> | null>}
    */
   async getRowGroupBboxes(files, duckdb, options = {}) {
     if (!files?.length || !duckdb) return null;
+    const { signal, onStatus } = options;
 
     const uncachedFiles = files.filter(file => !this._rowGroupCache.has(file.url));
     if (uncachedFiles.length > 0) {
       await duckdb.init();
 
       try {
-        const proxyUrls = uncachedFiles.map(file => proxyUrl(file.url));
-        const safeUrls = proxyUrls.map(url => `'${url.replace(/'/g, "''")}'`);
-        const proxyToFile = Object.fromEntries(
-          proxyUrls.map((url, index) => [url, uncachedFiles[index]])
-        );
-
-        const firstSafeUrl = proxyUrls[0].replace(/'/g, "''");
-        const coveringPaths = await this._getCoveringBboxPaths(firstSafeUrl, duckdb, options?.bboxColumn);
+        const firstProxyUrl = proxyUrl(uncachedFiles[0].url).replace(/'/g, "''");
+        const coveringPaths = await this._getCoveringBboxPaths(firstProxyUrl, duckdb, options?.bboxColumn);
         if (!coveringPaths) {
           for (const file of uncachedFiles) {
             this._rowGroupCache.set(file.url, null);
@@ -115,40 +110,55 @@ export class ParquetBboxReader {
             [ymaxPath]: ['ymax', 'stats_max'],
           };
 
-          const queryResult = await duckdb.conn.query(
-            `SELECT file_name, row_group_id, path_in_schema, stats_min, stats_max
-             FROM parquet_metadata([${safeUrls.join(',')}])
-             WHERE path_in_schema IN ('${xminPath}', '${yminPath}', '${xmaxPath}', '${ymaxPath}')
-             ORDER BY file_name, row_group_id, path_in_schema`
-          );
+          const BATCH_SIZE = 20;
+          const cachedCount = files.length - uncachedFiles.length;
+          for (let i = 0; i < uncachedFiles.length; i += BATCH_SIZE) {
+            signal?.throwIfAborted?.();
+            const batch = uncachedFiles.slice(i, i + BATCH_SIZE);
+            onStatus?.(`Loading row groups… ${cachedCount + Math.min(i + BATCH_SIZE, uncachedFiles.length)}/${files.length}`);
 
-          const fileGroups = {};
-          for (const row of queryResult.toArray()) {
-            const file = proxyToFile[row.file_name];
-            if (!file) continue;
+            const batchProxyUrls = batch.map(file => proxyUrl(file.url));
+            const batchSafeUrls = batchProxyUrls.map(url => `'${url.replace(/'/g, "''")}'`);
+            const proxyToFile = Object.fromEntries(
+              batchProxyUrls.map((url, index) => [url, batch[index]])
+            );
 
-            if (!fileGroups[file.url]) fileGroups[file.url] = {};
-            const rgId = Number(row.row_group_id);
-            if (!fileGroups[file.url][rgId]) fileGroups[file.url][rgId] = {};
+            const queryResult = await duckdb.conn.query(
+              `SELECT file_name, row_group_id, path_in_schema, stats_min, stats_max
+               FROM parquet_metadata([${batchSafeUrls.join(',')}])
+               WHERE path_in_schema IN ('${xminPath}', '${yminPath}', '${xmaxPath}', '${ymaxPath}')
+               ORDER BY file_name, row_group_id, path_in_schema`
+            );
 
-            const mapping = pathToField[row.path_in_schema];
-            if (mapping) {
-              fileGroups[file.url][rgId][mapping[0]] = Number(row[mapping[1]]);
+            const fileGroups = {};
+            for (const row of queryResult.toArray()) {
+              const file = proxyToFile[row.file_name];
+              if (!file) continue;
+
+              if (!fileGroups[file.url]) fileGroups[file.url] = {};
+              const rgId = Number(row.row_group_id);
+              if (!fileGroups[file.url][rgId]) fileGroups[file.url][rgId] = {};
+
+              const mapping = pathToField[row.path_in_schema];
+              if (mapping) {
+                fileGroups[file.url][rgId][mapping[0]] = Number(row[mapping[1]]);
+              }
             }
-          }
 
-          for (const file of uncachedFiles) {
-            const groups = fileGroups[file.url] || {};
-            const extents = {};
-            for (const [rgId, group] of Object.entries(groups)) {
-              if (group.xmin == null || group.ymin == null || group.xmax == null || group.ymax == null) continue;
-              if (!this._isValidWgs84Bbox(group.xmin, group.ymin, group.xmax, group.ymax)) continue;
-              extents[`rg_${rgId}`] = [group.xmin, group.ymin, group.xmax, group.ymax];
+            for (const file of batch) {
+              const groups = fileGroups[file.url] || {};
+              const extents = {};
+              for (const [rgId, group] of Object.entries(groups)) {
+                if (group.xmin == null || group.ymin == null || group.xmax == null || group.ymax == null) continue;
+                if (!this._isValidWgs84Bbox(group.xmin, group.ymin, group.xmax, group.ymax)) continue;
+                extents[`rg_${rgId}`] = [group.xmin, group.ymin, group.xmax, group.ymax];
+              }
+              this._rowGroupCache.set(file.url, Object.keys(extents).length ? extents : null);
             }
-            this._rowGroupCache.set(file.url, Object.keys(extents).length ? extents : null);
           }
         }
       } catch (error) {
+        if (signal?.aborted) throw error;
         console.error('[ParquetBboxReader] Failed to read row group bboxes:', error);
         for (const file of uncachedFiles) {
           this._rowGroupCache.set(file.url, null);

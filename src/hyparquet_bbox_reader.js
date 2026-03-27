@@ -62,9 +62,9 @@ export class HyparquetBboxReader {
 
     const runGeneration = this._cancelGeneration;
     const uncachedFiles = files.filter(file => !this._bboxCache.has(file.url));
-    await this._processInBatches(uncachedFiles, async (file) => {
-      const metadata = await this._getMetadata(file.url);
-      this._throwIfCancelled(runGeneration, options.signal);
+    await this._processInBatches(uncachedFiles, async (file, signal) => {
+      const metadata = await this._getMetadata(file.url, signal);
+      this._throwIfCancelled(runGeneration, signal);
       this._bboxCache.set(file.url, this._extractFileBbox(metadata));
     }, runGeneration, options.signal);
 
@@ -80,7 +80,7 @@ export class HyparquetBboxReader {
   /**
    * @param {{ id: string, url: string }[]} files
    * @param {unknown} _duckdb
-   * @param {{ bboxColumn?: string, signal?: AbortSignal }} [options]
+   * @param {{ bboxColumn?: string, signal?: AbortSignal, onStatus?: (msg: string) => void }} [options]
    * @returns {Promise<Record<string, Record<string, Bbox>> | null>}
    */
   async getRowGroupBboxes(files, _duckdb, options = {}) {
@@ -90,12 +90,13 @@ export class HyparquetBboxReader {
     const cacheKeyFor = (url) => `${url}::${options?.bboxColumn || ''}`;
     const uncachedFiles = files.filter(file => !this._rowGroupCache.has(cacheKeyFor(file.url)));
 
-    await this._processInBatches(uncachedFiles, async (file) => {
-      const metadata = await this._getMetadata(file.url);
-      this._throwIfCancelled(runGeneration, options.signal);
+    const cachedCount = files.length - uncachedFiles.length;
+    await this._processInBatches(uncachedFiles, async (file, signal) => {
+      const metadata = await this._getMetadata(file.url, signal);
+      this._throwIfCancelled(runGeneration, signal);
       const extents = this._extractRowGroupBboxes(metadata, options?.bboxColumn);
       this._rowGroupCache.set(cacheKeyFor(file.url), extents);
-    }, runGeneration, options.signal);
+    }, runGeneration, options.signal, options.onStatus, cachedCount, files.length);
 
     const result = {};
     for (const file of files) {
@@ -108,31 +109,38 @@ export class HyparquetBboxReader {
     return Object.keys(result).length ? result : null;
   }
 
-  async _processInBatches(items, worker, runGeneration, signal) {
+  async _processInBatches(items, worker, runGeneration, signal, onStatus, doneOffset = 0, total = items.length) {
     for (let i = 0; i < items.length; i += this._batchSize) {
       this._throwIfCancelled(runGeneration, signal);
+      if (onStatus) onStatus(`Loading row groups… ${doneOffset + Math.min(i + this._batchSize, items.length)}/${total}`);
       const batch = items.slice(i, i + this._batchSize);
-      await Promise.all(batch.map(worker));
+      await Promise.all(batch.map(item => worker(item, signal)));
     }
   }
 
-  async _getMetadata(url) {
-    if (!this._metadataCache.has(url)) {
-      const pending = this._metadataLoader(url).catch((error) => {
+  async _getMetadata(url, signal) {
+    const cacheKey = url;
+    if (!this._metadataCache.has(cacheKey)) {
+      const pending = this._metadataLoader(url, signal).catch((error) => {
+        this._metadataCache.delete(cacheKey);
+        if (signal?.aborted) throw error;
         console.error('[HyparquetBboxReader] Failed to load parquet metadata:', error);
         return null;
       });
-      this._metadataCache.set(url, pending);
+      this._metadataCache.set(cacheKey, pending);
     }
 
-    return this._metadataCache.get(url);
+    return this._metadataCache.get(cacheKey);
   }
 
-  async _loadMetadataFromUrl(url) {
+  async _loadMetadataFromUrl(url, signal) {
+    const requestInit = { ...this._requestInit };
+    if (signal) requestInit.signal = signal;
+
     const asyncBuffer = await asyncBufferFromUrl({
       url: proxyUrl(url),
       fetch: this._fetch,
-      requestInit: this._requestInit,
+      requestInit,
     });
 
     return parquetMetadataAsync(asyncBuffer, {

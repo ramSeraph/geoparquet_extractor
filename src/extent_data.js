@@ -90,9 +90,9 @@ export class ExtentData {
       dataExtents = Object.keys(dataExtents).length ? dataExtents : null;
 
       let rgExtents = null;
-      if (includeRowGroups && this._duckdb) {
-        onStatus?.('Loading row groups...');
-        rgExtents = await this._bboxReader.getRowGroupBboxes(files, this._duckdb, { bboxColumn, signal: internalSignal });
+      if (includeRowGroups) {
+        onStatus?.('Loading row groups…');
+        rgExtents = await this._bboxReader.getRowGroupBboxes(files, this._duckdb, { bboxColumn, signal: internalSignal, onStatus });
         this._throwIfCancelled(runGeneration, internalSignal);
       }
 
