@@ -1,92 +1,111 @@
-// ExtentData — fetches partition-level and row-group-level bounding boxes.
+// ExtentData — fetches file-level and row-group-level bounding boxes.
 // Returns raw extent data; callers handle presentation (GeoJSON, labels, etc.).
+
+import { ParquetBboxReader } from './parquet_bbox_reader.js';
 
 /**
  * @typedef {Object} ExtentDataOptions
- * @property {import('./metadata.js').MetadataProvider} metadataProvider
- * @property {import('./duckdb_adapter.js').DuckDBClient} [duckdb] - Required for row-group bbox queries
+ * @property {import('./source_resolver.js').SourceResolver} sourceResolver
+ * @property {import('./parquet_bbox_reader.js').ParquetBboxReader} [bboxReader]
+ * @property {import('./duckdb_adapter.js').DuckDBClient} [duckdb] - Required for parquet bbox queries
  */
 
 export class ExtentData {
   /**
    * @param {ExtentDataOptions} options
    */
-  constructor({ metadataProvider, duckdb }) {
-    if (!metadataProvider) throw new Error('metadataProvider is required');
-    this._metadataProvider = metadataProvider;
+  constructor({ sourceResolver, bboxReader, duckdb }) {
+    if (!sourceResolver) throw new Error('sourceResolver is required');
+    this._sourceResolver = sourceResolver;
+    this._bboxReader = bboxReader || new ParquetBboxReader();
     this._duckdb = duckdb || null;
+    this._cancelGeneration = 0;
   }
 
   /**
-   * Fetch partition-level and row-group-level extent data for a source.
+   * Attach or replace the DuckDB client used for parquet metadata fallback.
+   * @param {import('./duckdb_adapter.js').DuckDBClient | null} duckdb
+   */
+  setDuckDB(duckdb) {
+    this._duckdb = duckdb || null;
+  }
+
+  cancel() {
+    this._cancelGeneration += 1;
+    this._bboxReader?.cancel?.();
+    this._duckdb?.terminate?.();
+    this._duckdb = null;
+  }
+
+  /**
+   * Fetch file-level and row-group-level extent data for a source.
    *
    * @param {object} options
    * @param {string} options.sourceUrl - Source route URL
-   * @param {boolean} [options.partitioned=false] - Whether the source is partitioned
-   * @param {boolean} [options.includeRowGroups=true] - Whether to fetch row-group bboxes
-   * @param {string} [options.bboxColumn] - Explicit bbox struct column name (e.g. 'bbox')
-   *   to use for row-group stats when GeoParquet covering metadata is absent.
-   * @param {(msg: string) => void} [options.onStatus] - Status callback
-   * @returns {Promise<{
-   *   dataExtents: Object<string, number[]> | null,
-   *   rgExtents: Object<string, Object<string, number[]>> | null
-   * }>}
-   *   dataExtents: { filename: [minx,miny,maxx,maxy] }
-   *   rgExtents: { filename: { rg_N: [minx,miny,maxx,maxy] } }
-   */
-  async fetchExtents({ sourceUrl, partitioned = false, includeRowGroups = true, bboxColumn, onStatus }) {
-    if (partitioned) {
-      return this._fetchPartitioned(sourceUrl, includeRowGroups, bboxColumn, onStatus);
-    } else {
-      return this._fetchSingle(sourceUrl, includeRowGroups, bboxColumn, onStatus);
-    }
-  }
+    * @param {boolean} [options.includeRowGroups=true] - Whether to fetch row-group bboxes
+    * @param {string} [options.bboxColumn] - Explicit bbox struct column name (e.g. 'bbox')
+    *   to use for row-group stats when GeoParquet covering metadata is absent.
+    * @param {(msg: string) => void} [options.onStatus] - Status callback
+    * @param {AbortSignal} [options.signal] - Abort signal for cancelling extent loading.
+    * @returns {Promise<{
+    *   dataExtents: Object<string, number[]> | null,
+    *   rgExtents: Object<string, Object<string, number[]>> | null
+    * }>}
+    */
+  async fetchExtents({ sourceUrl, includeRowGroups = true, bboxColumn, onStatus, signal }) {
+    const runGeneration = this._cancelGeneration;
+    const abortHandler = () => this.cancel();
+    signal?.addEventListener('abort', abortHandler, { once: true });
 
-  // --- Private ---
+    try {
+      this._throwIfCancelled(runGeneration, signal);
 
-  async _fetchPartitioned(sourceUrl, includeRowGroups, bboxColumn, onStatus) {
-    const extents = await this._metadataProvider.getExtents(sourceUrl);
-    const dataExtents = extents && Object.keys(extents).length ? extents : null;
+      const { files } = await this._sourceResolver.resolve(sourceUrl);
+      this._throwIfCancelled(runGeneration, signal);
+      if (!files?.length) return { dataExtents: null, rgExtents: null };
 
-    let rgExtents = null;
-    if (includeRowGroups && this._duckdb) {
-      const parquetUrls = await this._metadataProvider.getParquetUrls(sourceUrl);
-      if (parquetUrls?.length) {
-        onStatus?.('Loading row groups...');
-        rgExtents = await this._metadataProvider.getRowGroupBboxesMulti(
-          parquetUrls, this._duckdb, { bboxColumn }
+      let dataExtents = {};
+      for (const file of files) {
+        if (file.bbox) dataExtents[file.id] = file.bbox;
+      }
+
+      if (Object.keys(dataExtents).length !== files.length && this._duckdb) {
+        const fallbackBboxes = await this._bboxReader.getFileBboxes(
+          files.filter(file => !file.bbox),
+          this._duckdb,
+          { signal },
         );
+        this._throwIfCancelled(runGeneration, signal);
+        if (fallbackBboxes) dataExtents = { ...dataExtents, ...fallbackBboxes };
       }
-    }
 
-    return { dataExtents, rgExtents };
+      dataExtents = Object.keys(dataExtents).length ? dataExtents : null;
+
+      let rgExtents = null;
+      if (includeRowGroups && this._duckdb) {
+        onStatus?.('Loading row groups...');
+        rgExtents = await this._bboxReader.getRowGroupBboxes(files, this._duckdb, { bboxColumn, signal });
+        this._throwIfCancelled(runGeneration, signal);
+      }
+
+      return { dataExtents, rgExtents };
+    } catch (error) {
+      if (this._isCancelled(runGeneration, signal)) {
+        throw new DOMException('Extent loading cancelled', 'AbortError');
+      }
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', abortHandler);
+    }
   }
 
-  async _fetchSingle(sourceUrl, includeRowGroups, bboxColumn, onStatus) {
-    const parquetUrls = await this._metadataProvider.getParquetUrls(sourceUrl);
-    const parquetUrl = parquetUrls?.[0];
-    if (!parquetUrl) return { dataExtents: null, rgExtents: null };
+  _isCancelled(runGeneration, signal) {
+    return signal?.aborted || this._cancelGeneration !== runGeneration;
+  }
 
-    const bbox = await this._metadataProvider.getBbox(parquetUrl, this._duckdb);
-
-    let dataExtents = null;
-    if (bbox) {
-      const filename = parquetUrl.substring(parquetUrl.lastIndexOf('/') + 1);
-      dataExtents = { [filename]: bbox };
+  _throwIfCancelled(runGeneration, signal) {
+    if (this._isCancelled(runGeneration, signal)) {
+      throw new DOMException('Extent loading cancelled', 'AbortError');
     }
-
-    let rgExtents = null;
-    if (includeRowGroups && this._duckdb) {
-      onStatus?.('Loading row groups...');
-      const rgBboxes = await this._metadataProvider.getRowGroupBboxes(
-        parquetUrl, this._duckdb, { bboxColumn }
-      );
-      if (rgBboxes) {
-        const filename = parquetUrl.substring(parquetUrl.lastIndexOf('/') + 1);
-        rgExtents = { [filename]: rgBboxes };
-      }
-    }
-
-    return { dataExtents, rgExtents };
   }
 }

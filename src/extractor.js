@@ -12,6 +12,8 @@ import { GeoPackageFormatHandler } from './formats/geopackage.js';
 import { ShapefileFormatHandler } from './formats/shapefile.js';
 import { KmlFormatHandler } from './formats/kml.js';
 import { DxfFormatHandler } from './formats/dxf.js';
+import { SourceResolver } from './source_resolver.js';
+import { ParquetBboxReader } from './parquet_bbox_reader.js';
 
 /** Normalize extent (array or object) to [minx, miny, maxx, maxy]. */
 function extentBounds(extent) {
@@ -67,12 +69,11 @@ function extractSessionId(name) {
   return null;
 }
 
-
-
 /**
  * @typedef {Object} GeoParquetExtractorOptions
  * @property {import('./duckdb_adapter.js').DuckDBClient} duckdb - Pre-initialized DuckDB client
- * @property {import('./metadata.js').MetadataProvider} [metadataProvider] - Optional metadata provider
+ * @property {import('./source_resolver.js').SourceResolver} [sourceResolver] - Optional source resolver
+ * @property {import('./parquet_bbox_reader.js').ParquetBboxReader} [bboxReader] - Optional parquet bbox reader
  * @property {string} [gpkgWorkerUrl] - URL for GeoPackage worker (or Worker instance)
  * @property {Worker} [gpkgWorker] - Pre-constructed GeoPackage Worker instance
  * @property {number} [memoryLimitMB] - DuckDB memory limit in MB
@@ -80,9 +81,8 @@ function extractSessionId(name) {
 
 /**
  * @typedef {Object} ExtractOptions
- * @property {string[]} [urls] - Direct parquet URLs (skip metadata resolution)
- * @property {string} [sourceUrl] - Source URL for metadata resolution
- * @property {boolean} [partitioned] - Whether the source is partitioned
+ * @property {string[]} [urls] - Direct parquet URLs (skip source resolution)
+ * @property {string} [sourceUrl] - Source URL for source resolution
  * @property {number[]} bbox - [west, south, east, north] bounding box
  * @property {string} format - Output format (csv, geojson, geojsonseq, geoparquet, geoparquet2, geopackage, shapefile, kml, dxf)
  * @property {string} [baseName] - Base filename for download (without extension)
@@ -96,11 +96,12 @@ export class GeoParquetExtractor {
    * @param {GeoParquetExtractorOptions} options
    */
   constructor(options) {
-    const { duckdb, metadataProvider, gpkgWorkerUrl, gpkgWorker, memoryLimitMB } = options;
+    const { duckdb, sourceResolver, bboxReader, gpkgWorkerUrl, gpkgWorker, memoryLimitMB } = options;
     if (!duckdb) throw new Error('duckdb is required');
 
     this._duckdb = duckdb;
-    this._metadataProvider = metadataProvider || null;
+    this._sourceResolver = sourceResolver || new SourceResolver();
+    this._bboxReader = bboxReader || new ParquetBboxReader();
     this._gpkgWorkerUrl = gpkgWorkerUrl || null;
     this._gpkgWorker = gpkgWorker || null;
     this._memoryLimitMB = memoryLimitMB || null;
@@ -111,10 +112,7 @@ export class GeoParquetExtractor {
     this._cancelPromise = null;
     this._initialized = false;
 
-    // Generate a unique session ID for OPFS scoping
     this._sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    // Hold a Web Lock for this session's lifetime
     this._lockName = `${SESSION_LOCK_PREFIX}${this._sessionId}`;
     this._lockReady = new Promise(resolve => {
       navigator.locks.request(this._lockName, () => {
@@ -124,10 +122,6 @@ export class GeoParquetExtractor {
     });
   }
 
-  /**
-   * Initialize DuckDB temp directory and memory settings.
-   * Called automatically by prepare(), but can be called early.
-   */
   async init(onStatus) {
     if (this._initialized) return;
 
@@ -145,83 +139,48 @@ export class GeoParquetExtractor {
   }
 
   /**
-   * Resolve parquet URLs from metadata provider for a given source + bbox.
+   * Resolve parquet files from source resolver for a given source + bbox.
    * @param {string} sourceUrl
-   * @param {boolean} partitioned
    * @param {number[]} bbox - [west, south, east, north]
    * @param {(msg: string) => void} [onStatus]
-   * @returns {Promise<string[]>}
+   * @returns {Promise<{ id: string, url: string, bbox?: number[] | null }[]>}
    */
-  async resolveUrls(sourceUrl, partitioned, bbox, onStatus) {
-    if (!this._metadataProvider) {
-      throw new Error('MetadataProvider required to resolve URLs from sourceUrl');
-    }
-
-    if (!partitioned) {
-      const urls = await this._metadataProvider.getParquetUrls(sourceUrl);
-      return urls;
-    }
-
-    const extents = await this._metadataProvider.getExtents(sourceUrl);
-    if (!extents || Object.keys(extents).length === 0) {
-      throw new Error('Could not load partition metadata');
-    }
-
-    const filtered = [];
-    for (const [filename, extent] of Object.entries(extents)) {
-      const [minx, miny, maxx, maxy] = extentBounds(extent);
-      if (!(bbox[2] < minx || bbox[0] > maxx || bbox[3] < miny || bbox[1] > maxy)) {
-        filtered.push(filename);
-      }
-    }
-
-    if (filtered.length === 0) {
+  async resolveFiles(sourceUrl, bbox, onStatus) {
+    const { files } = await this._sourceResolver.resolve(sourceUrl, { bbox });
+    if (!files?.length) {
       throw new Error('No data found in current bbox');
     }
 
-    onStatus?.(`Found ${filtered.length} partition(s) in bbox...`);
-
-    // Resolve filenames to full URLs
-    const allUrls = await this._metadataProvider.getParquetUrls(sourceUrl);
-    const baseUrl = allUrls[0]?.replace(/[^/]+$/, '') || '';
-    return filtered.map(f => baseUrl + f);
+    onStatus?.(`Found ${files.length} file(s) in bbox...`);
+    return files;
   }
 
   /**
    * Estimate download size based on file sizes and bbox overlap.
-   * @param {string[]} parquetUrls
+   * @param {{ id: string, url: string, bbox?: number[] | null }[]} files
    * @param {number[]} bbox - [west, south, east, north]
-   * @param {string} [sourceUrl] - For getting extents
-   * @param {boolean} [partitioned]
    * @returns {Promise<number>}
    */
-  async estimateSize(parquetUrls, bbox, sourceUrl, partitioned) {
-    // Get file sizes via HEAD requests
-    const sizes = await Promise.all(
-      parquetUrls.map(url => this._sizeGetter.getSizeBytes(url))
-    );
+  async estimateSize(files, bbox) {
+    const sizes = await Promise.all(files.map(file => this._sizeGetter.getSizeBytes(file.url)));
 
-    let fileExtents = {};
-    if (this._metadataProvider && sourceUrl) {
-      if (partitioned) {
-        fileExtents = await this._metadataProvider.getExtents(sourceUrl) || {};
-      } else {
-        const overallBbox = await this._metadataProvider.getBbox(parquetUrls[0], this._duckdb);
-        if (overallBbox) {
-          fileExtents = { [parquetUrls[0]]: overallBbox };
-        }
-      }
+    let fallbackBboxes = null;
+    if (files.some(file => !file.bbox)) {
+      fallbackBboxes = await this._bboxReader.getFileBboxes(
+        files.filter(file => !file.bbox),
+        this._duckdb,
+      );
     }
 
     this._throwIfCancelled();
 
     let totalEstimate = 0;
-    for (let i = 0; i < parquetUrls.length; i++) {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
       const fileSize = sizes[i];
       if (!fileSize) continue;
 
-      const filename = parquetUrls[i].split('/').pop();
-      const extent = fileExtents[filename] || fileExtents[parquetUrls[i]];
+      const extent = file.bbox || fallbackBboxes?.[file.id] || null;
       const ratio = bboxOverlapRatio(extent, bbox);
       totalEstimate += fileSize * (ratio ?? 1);
     }
@@ -236,7 +195,16 @@ export class GeoParquetExtractor {
    * @returns {Promise<import('./formats/base.js').FormatHandler>}
    */
   async prepare(options) {
-    const { urls, sourceUrl, partitioned, bbox, format, flattenStructs, onProgress, onStatus, memoryLimitMB } = options;
+    const {
+      urls,
+      sourceUrl,
+      bbox,
+      format,
+      flattenStructs = false,
+      onProgress,
+      onStatus,
+      memoryLimitMB,
+    } = options;
 
     this._cancelled = false;
     this._cancelPromise = new Promise((_, reject) => {
@@ -256,28 +224,30 @@ export class GeoParquetExtractor {
 
     onProgress?.(0);
 
-    // Resolve parquet URLs
-    let parquetUrls;
+    let files;
     if (urls && urls.length > 0) {
-      parquetUrls = urls;
+      files = urls.map(url => ({
+        id: url.substring(url.lastIndexOf('/') + 1) || url,
+        url,
+        bbox: null,
+      }));
     } else if (sourceUrl) {
-      parquetUrls = await this.resolveUrls(sourceUrl, !!partitioned, bbox, onStatus);
+      files = await this.resolveFiles(sourceUrl, bbox, onStatus);
     } else {
       throw new Error('Either urls or sourceUrl is required');
     }
 
+    const parquetUrls = files.map(file => file.url);
+
     this._throwIfCancelled();
 
     onStatus?.(`Estimating download size from ${parquetUrls.length} file(s)...`);
-    const estimatedBytes = await this.estimateSize(parquetUrls, bbox, sourceUrl, partitioned);
+    const estimatedBytes = await this.estimateSize(files, bbox);
 
     this._throwIfCancelled();
     onProgress?.(PROGRESS_WRITE_START);
 
-    // Apply proxy URL to all parquet URLs
     const resolvedUrls = parquetUrls.map(u => proxyUrl(u));
-
-    // Format handlers expect bbox as { west, south, east, north } object
     const bboxObj = Array.isArray(bbox)
       ? { west: bbox[0], south: bbox[1], east: bbox[2], north: bbox[3] }
       : bbox;
@@ -288,10 +258,9 @@ export class GeoParquetExtractor {
       urls: resolvedUrls,
       bbox: bboxObj,
       estimatedBytes,
-      flattenStructs: flattenStructs ?? false,
+      flattenStructs,
     };
 
-    // Pass gpkg worker config through if needed
     if (format === 'geopackage') {
       handlerOpts.gpkgWorker = this._gpkgWorker || this._gpkgWorkerUrl;
     }
@@ -300,15 +269,6 @@ export class GeoParquetExtractor {
     return this._formatHandler;
   }
 
-  /**
-   * Execute the download using a previously prepared format handler.
-   * @param {import('./formats/base.js').FormatHandler} formatHandler
-   * @param {object} options
-   * @param {string} options.baseName - Base filename for download
-   * @param {(pct: number) => void} [options.onProgress]
-   * @param {(msg: string) => void} [options.onStatus]
-   * @returns {Promise<boolean>}
-   */
   async download(formatHandler, { baseName, onProgress, onStatus }) {
     try {
       const writeProgress = new ScopedProgress(onProgress, PROGRESS_WRITE_START, PROGRESS_WRITE_END);
@@ -329,7 +289,6 @@ export class GeoParquetExtractor {
 
       onProgress?.(100);
       return true;
-
     } catch (e) {
       this._throwIfCancelled();
       throw e;
@@ -341,11 +300,6 @@ export class GeoParquetExtractor {
     }
   }
 
-  /**
-   * Convenience: prepare + download in one call.
-   * @param {ExtractOptions & { baseName: string }} options
-   * @returns {Promise<boolean>}
-   */
   async extract(options) {
     const { baseName, onProgress, onStatus, ...prepareOpts } = options;
     const handler = await this.prepare({ ...prepareOpts, onProgress, onStatus });
@@ -358,7 +312,6 @@ export class GeoParquetExtractor {
     return this.download(handler, { baseName, onProgress, onStatus });
   }
 
-  /** Cancel any in-flight download. Terminates DuckDB to kill in-flight queries. */
   cancel() {
     this._cancelled = true;
     this._formatHandler?.cancel();
@@ -373,7 +326,6 @@ export class GeoParquetExtractor {
     }, 1000);
   }
 
-  /** Generate a suggested base filename. */
   static getDownloadBaseName(sourceName, bbox) {
     const coordStr = bbox
       .map(c => c.toFixed(4).replace(/\./g, '-'))
@@ -381,10 +333,6 @@ export class GeoParquetExtractor {
     return `${sourceName.replace(/\s+/g, '_')}.${coordStr}`;
   }
 
-  /**
-   * Clean up orphaned OPFS entries from dead sessions.
-   * Call periodically or on app startup.
-   */
   static async cleanupOrphanedFiles() {
     try {
       const { held } = await navigator.locks.query();
@@ -401,7 +349,7 @@ export class GeoParquetExtractor {
           try {
             await root.removeEntry(name, { recursive: handle.kind === 'directory' });
             count++;
-          } catch (e) { /* may be locked or already removed */ } // eslint-disable-line no-unused-vars
+          } catch { /* may be locked or already removed */ }
         }
       }
 

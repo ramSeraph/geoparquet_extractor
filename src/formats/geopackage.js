@@ -6,6 +6,13 @@ import { FormatHandler } from './base.js';
 import { OPFS_PREFIX_GPKG_TMP, OPFS_PREFIX_GPKG } from '../utils.js';
 import { ScopedProgress } from '../scoped_progress.js';
 
+function isWorkerLike(value) {
+  return !!value &&
+    typeof value === 'object' &&
+    typeof value.postMessage === 'function' &&
+    typeof value.terminate === 'function';
+}
+
 export class GeoPackageFormatHandler extends FormatHandler {
   /**
    * @param {object} opts
@@ -17,6 +24,36 @@ export class GeoPackageFormatHandler extends FormatHandler {
     this.extension = 'gpkg';
     this._worker = null;
     this._gpkgWorkerConfig = opts.gpkgWorker ?? null;
+    this._nextWorkerMessageId = 1;
+  }
+
+  async _callWorker(method, args, { onStatus } = {}) {
+    return await new Promise((resolve, reject) => {
+      const msgId = this._nextWorkerMessageId++;
+      const handleMessage = (e) => {
+        const { id, result, error, progress, status } = e.data;
+        if (id !== msgId) return;
+        if (progress) {
+          onStatus?.(status);
+          return;
+        }
+        cleanup();
+        if (error) reject(new Error(error));
+        else resolve(result);
+      };
+      const handleError = (e) => {
+        cleanup();
+        reject(new Error(e.message));
+      };
+      const cleanup = () => {
+        this._worker.onmessage = null;
+        this._worker.onerror = null;
+      };
+
+      this._worker.onmessage = handleMessage;
+      this._worker.onerror = handleError;
+      this._worker.postMessage({ id: msgId, method, args });
+    });
   }
 
   cancel() {
@@ -62,7 +99,7 @@ export class GeoPackageFormatHandler extends FormatHandler {
     );
 
     // Create worker from config (use blob URL for cross-origin support)
-    if (this._gpkgWorkerConfig instanceof Worker) {
+    if (isWorkerLike(this._gpkgWorkerConfig)) {
       this._worker = this._gpkgWorkerConfig;
     } else {
       const workerUrl = URL.createObjectURL(
@@ -73,27 +110,11 @@ export class GeoPackageFormatHandler extends FormatHandler {
     }
 
     try {
-      await new Promise((resolve, reject) => {
-        const msgId = 1;
-        this._worker.onmessage = (e) => {
-          const { id, result, error, progress, status } = e.data;
-          if (id !== msgId) return;
-          if (progress) {
-            onStatus?.(status);
-            return;
-          }
-          if (error) reject(new Error(error));
-          else resolve(result);
-        };
-        this._worker.onerror = (e) => {
-          reject(new Error(e.message));
-        };
-        this._worker.postMessage({
-          id: msgId,
-          method: 'writeFromParquet',
-          args: { parquetFileName: tempParquetPath.replace('opfs://', ''), gpkgFileName: this.gpkgFileName },
-        });
-      });
+      await this._callWorker(
+        'writeFromParquet',
+        { parquetFileName: tempParquetPath.replace('opfs://', ''), gpkgFileName: this.gpkgFileName },
+        { onStatus }
+      );
     } finally {
       stopTracker2();
       this._worker?.terminate();

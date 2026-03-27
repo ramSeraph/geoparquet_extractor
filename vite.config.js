@@ -8,8 +8,28 @@ import { copyFileSync, existsSync } from 'fs';
 const isWorkerBuild = process.env.BUILD_TARGET === 'worker';
 
 export default defineConfig({
+  assetsInclude: ['**/*.parquet'],
+  optimizeDeps: {
+    include: [
+      'wa-sqlite-rtree/dist/wa-sqlite-async.mjs',
+      'wa-sqlite-rtree/src/sqlite-api.js',
+      'wa-sqlite-rtree/src/examples/OPFSAdaptiveVFS.js',
+      'wa-sqlite-rtree/src/examples/OPFSAnyContextVFS.js',
+    ],
+  },
   test: {
     environment: 'jsdom',
+    testTimeout: 60000,
+    hookTimeout: 60000,
+    browser: {
+      enabled: true,
+      provider: 'playwright',
+      headless: true,
+      screenshotFailures: false,
+      instances: [
+        { browser: 'webkit' },
+      ],
+    },
   },
   build: {
     lib: {

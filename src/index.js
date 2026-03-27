@@ -8,8 +8,10 @@ export { ExtentData } from './extent_data.js';
 // DuckDB adapter
 export { createDuckDBClient, initDuckDB } from './duckdb_adapter.js';
 
-// Metadata provider
-export { MetadataProvider } from './metadata.js';
+// Source resolution + parquet bbox reading
+export { SourceResolver } from './source_resolver.js';
+export { ParquetBboxReader } from './parquet_bbox_reader.js';
+export { HyparquetBboxReader } from './hyparquet_bbox_reader.js';
 
 // Format handlers (for advanced usage / subclassing)
 export { FormatHandler } from './formats/base.js';

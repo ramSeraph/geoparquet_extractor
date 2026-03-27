@@ -91,7 +91,7 @@ export const KML_HEADER = `<?xml version="1.0" encoding="UTF-8"?>
 <LineStyle><color>ff0000ff</color><width>2</width></LineStyle>
 </Style>
 <Style id="default-point">
-<IconStyle><color>ff0000ff</color><scale>1</scale></IconStyle>
+<IconStyle><color>ff0000ff</color><scale>0.8</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/shaded_dot.png</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle>
 </Style>
 `;
 

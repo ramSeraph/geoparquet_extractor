@@ -32,6 +32,20 @@ describe('shp_writer', () => {
       const { typeMapping } = resolveShpTypeMapping(new Set(['POINT', 'MULTIPOINT']));
       expect(typeMapping.get('POINT').needsPromote).toBe(true);
     });
+
+    it('maps LINESTRING and MULTILINESTRING to one line shapefile type', () => {
+      const { shpTypes, typeMapping } = resolveShpTypeMapping(new Set(['LINESTRING', 'MULTILINESTRING']));
+      expect(shpTypes).toEqual(['line']);
+      expect(typeMapping.get('LINESTRING')).toEqual({ shpType: 'line', needsPromote: false });
+      expect(typeMapping.get('MULTILINESTRING')).toEqual({ shpType: 'line', needsPromote: false });
+    });
+
+    it('maps POLYGON and MULTIPOLYGON to one polygon shapefile type', () => {
+      const { shpTypes, typeMapping } = resolveShpTypeMapping(new Set(['POLYGON', 'MULTIPOLYGON']));
+      expect(shpTypes).toEqual(['polygon']);
+      expect(typeMapping.get('POLYGON')).toEqual({ shpType: 'polygon', needsPromote: false });
+      expect(typeMapping.get('MULTIPOLYGON')).toEqual({ shpType: 'polygon', needsPromote: false });
+    });
   });
 
   describe('truncateFieldNames', () => {
@@ -44,6 +58,23 @@ describe('shp_writer', () => {
       const result = truncateFieldNames(['abcdefghij1', 'abcdefghij2']);
       const dbfNames = result.map(r => r.dbfName);
       expect(new Set(dbfNames).size).toBe(2);
+    });
+
+    it('keeps long dotted field names unique within the 10 character DBF limit', () => {
+      const result = truncateFieldNames([
+        'transport_details.identifier_code',
+        'transport_details.identifier_name',
+        'transport_depth.identifier_code',
+        'administrative_details.identifier_code',
+      ]);
+
+      expect(result.map(r => r.dbfName)).toEqual([
+        'transport_',
+        'transport1',
+        'transport2',
+        'administra',
+      ]);
+      expect(result.every(r => r.dbfName.length <= 10)).toBe(true);
     });
   });
 
@@ -75,6 +106,24 @@ describe('kml_writer', () => {
     const kml = geometryToKml({ type: 'Point', coordinates: [1, 2] });
     expect(kml).toContain('<Point>');
     expect(kml).toContain('1,2');
+  });
+
+   it('converts MultiPoint to KML MultiGeometry', () => {
+    const kml = geometryToKml({ type: 'MultiPoint', coordinates: [[1, 2], [3, 4]] });
+    expect(kml).toContain('<MultiGeometry>');
+    expect((kml.match(/<Point>/g) || [])).toHaveLength(2);
+  });
+
+  it('converts MultiPolygon to KML MultiGeometry', () => {
+    const kml = geometryToKml({
+      type: 'MultiPolygon',
+      coordinates: [
+        [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+        [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]],
+      ],
+    });
+    expect(kml).toContain('<MultiGeometry>');
+    expect((kml.match(/<Polygon>/g) || [])).toHaveLength(2);
   });
 
   it('featureToPlacemark generates valid XML', () => {

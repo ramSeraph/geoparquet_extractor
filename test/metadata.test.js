@@ -1,23 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { MetadataProvider } from '../src/metadata.js';
+import { SourceResolver } from '../src/source_resolver.js';
 
-describe('MetadataProvider', () => {
-  it('getParquetUrl returns sourceUrl as-is by default', () => {
-    const mp = new MetadataProvider();
-    expect(mp.getParquetUrl('https://example.com/data.parquet'))
-      .toBe('https://example.com/data.parquet');
+describe('SourceResolver', () => {
+  it('default resolver returns the source URL as a single file', async () => {
+    const resolver = new SourceResolver();
+    const { files } = await resolver.resolve('https://example.com/data.parquet');
+
+    expect(files).toEqual([
+      { id: 'data.parquet', url: 'https://example.com/data.parquet', bbox: null },
+    ]);
   });
 
-  it('getParquetUrl preserves non-parquet URLs (override needed)', () => {
-    const mp = new MetadataProvider();
-    expect(mp.getParquetUrl('https://example.com/data.pmtiles'))
-      .toBe('https://example.com/data.pmtiles');
-  });
+  it('default resolver preserves non-parquet URLs as-is', async () => {
+    const resolver = new SourceResolver();
+    const { files } = await resolver.resolve('https://example.com/data.pmtiles');
 
-  it('default implementations return sensible values', async () => {
-    const mp = new MetadataProvider();
-    expect(await mp.getExtents('url')).toBeNull();
-    expect(await mp.getParquetUrls('https://example.com/data.parquet'))
-      .toEqual(['https://example.com/data.parquet']);
+    expect(files).toEqual([
+      { id: 'data.pmtiles', url: 'https://example.com/data.pmtiles', bbox: null },
+    ]);
   });
 });

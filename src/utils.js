@@ -59,7 +59,11 @@ export function bboxUtmZone(bbox) {
  * @returns {Promise<{ usage: number | undefined, quota: number | undefined }>}
  */
 export async function getStorageEstimate() {
-  const { usage, quota } = await navigator.storage.estimate();
+  const estimate = navigator.storage?.estimate;
+  if (typeof estimate !== 'function') {
+    return { usage: undefined, quota: undefined };
+  }
+  const { usage, quota } = await estimate.call(navigator.storage);
   return { usage, quota };
 }
 

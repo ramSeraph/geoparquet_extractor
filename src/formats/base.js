@@ -108,6 +108,7 @@ export class FormatHandler {
     const poll = async () => {
       if (stopped) return;
       const { usage: currentUsage } = await getStorageEstimate();
+      if (typeof currentUsage !== 'number') return;
       if (baselineUsage === null) {
         baselineUsage = currentUsage;
         return;
