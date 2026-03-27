@@ -110,6 +110,7 @@ export class GeoParquetExtractor {
     this._cancelled = false;
     this._rejectCancel = null;
     this._cancelPromise = null;
+    this._abortController = null;
     this._initialized = false;
 
     this._sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -146,7 +147,11 @@ export class GeoParquetExtractor {
    * @returns {Promise<{ id: string, url: string, bbox?: number[] | null }[]>}
    */
   async resolveFiles(sourceUrl, bbox, onStatus) {
-    const { files } = await this._sourceResolver.resolve(sourceUrl, { bbox });
+    const { files } = await this._sourceResolver.resolve(sourceUrl, {
+      bbox,
+      signal: this._abortController?.signal,
+      onStatus,
+    });
     if (!files?.length) {
       throw new Error('No data found in current bbox');
     }
@@ -207,6 +212,7 @@ export class GeoParquetExtractor {
     } = options;
 
     this._cancelled = false;
+    this._abortController = new AbortController();
     this._cancelPromise = new Promise((_, reject) => {
       this._rejectCancel = reject;
     });
@@ -295,6 +301,7 @@ export class GeoParquetExtractor {
     } finally {
       this._rejectCancel = null;
       this._cancelPromise = null;
+      this._abortController = null;
       this._formatHandler = null;
       await formatHandler.cleanup();
     }
@@ -314,6 +321,7 @@ export class GeoParquetExtractor {
 
   cancel() {
     this._cancelled = true;
+    this._abortController?.abort();
     this._formatHandler?.cancel();
     this._duckdb.terminate();
     this._initialized = false;

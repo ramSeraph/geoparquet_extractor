@@ -17,7 +17,7 @@
 export class SourceResolver {
   /**
    * @param {string} sourceUrl
-   * @param {{ bbox?: Bbox }} [options]
+   * @param {{ bbox?: Bbox, signal?: AbortSignal, onStatus?: (msg: string) => void }} [options]
    * @returns {Promise<{ files: ResolvedFile[] }>}
    */
   async resolve(sourceUrl, _options = {}) {

@@ -20,6 +20,7 @@ export class ExtentData {
     this._bboxReader = bboxReader || new ParquetBboxReader();
     this._duckdb = duckdb || null;
     this._cancelGeneration = 0;
+    this._abortController = null;
   }
 
   /**
@@ -32,6 +33,8 @@ export class ExtentData {
 
   cancel() {
     this._cancelGeneration += 1;
+    this._abortController?.abort();
+    this._abortController = null;
     this._bboxReader?.cancel?.();
     this._duckdb?.terminate?.();
     this._duckdb = null;
@@ -54,14 +57,19 @@ export class ExtentData {
     */
   async fetchExtents({ sourceUrl, includeRowGroups = true, bboxColumn, onStatus, signal }) {
     const runGeneration = this._cancelGeneration;
-    const abortHandler = () => this.cancel();
+    this._abortController = new AbortController();
+    const internalSignal = this._abortController.signal;
+
+    // If an external signal is provided, link it to our internal controller
+    const abortHandler = () => this._abortController?.abort();
     signal?.addEventListener('abort', abortHandler, { once: true });
 
     try {
-      this._throwIfCancelled(runGeneration, signal);
+      this._throwIfCancelled(runGeneration, internalSignal);
 
-      const { files } = await this._sourceResolver.resolve(sourceUrl);
-      this._throwIfCancelled(runGeneration, signal);
+      onStatus?.('Resolving files…');
+      const { files } = await this._sourceResolver.resolve(sourceUrl, { signal: internalSignal, onStatus });
+      this._throwIfCancelled(runGeneration, internalSignal);
       if (!files?.length) return { dataExtents: null, rgExtents: null };
 
       let dataExtents = {};
@@ -73,9 +81,9 @@ export class ExtentData {
         const fallbackBboxes = await this._bboxReader.getFileBboxes(
           files.filter(file => !file.bbox),
           this._duckdb,
-          { signal },
+          { signal: internalSignal },
         );
-        this._throwIfCancelled(runGeneration, signal);
+        this._throwIfCancelled(runGeneration, internalSignal);
         if (fallbackBboxes) dataExtents = { ...dataExtents, ...fallbackBboxes };
       }
 
@@ -84,18 +92,19 @@ export class ExtentData {
       let rgExtents = null;
       if (includeRowGroups && this._duckdb) {
         onStatus?.('Loading row groups...');
-        rgExtents = await this._bboxReader.getRowGroupBboxes(files, this._duckdb, { bboxColumn, signal });
-        this._throwIfCancelled(runGeneration, signal);
+        rgExtents = await this._bboxReader.getRowGroupBboxes(files, this._duckdb, { bboxColumn, signal: internalSignal });
+        this._throwIfCancelled(runGeneration, internalSignal);
       }
 
       return { dataExtents, rgExtents };
     } catch (error) {
-      if (this._isCancelled(runGeneration, signal)) {
+      if (this._isCancelled(runGeneration, internalSignal)) {
         throw new DOMException('Extent loading cancelled', 'AbortError');
       }
       throw error;
     } finally {
       signal?.removeEventListener('abort', abortHandler);
+      this._abortController = null;
     }
   }
 
