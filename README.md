@@ -34,6 +34,7 @@ Browser
 
 - **[Indian Open Maps](https://indianopenmaps.com/)** — extract Indian geospatial datasets
 - **[OSM Layercake Extract](https://ramseraph.github.io/osm-layercake-extract/)** — extract OpenStreetMap data from OSMUS Layercake datasets
+- **[Overture Maps Extract](https://ramseraph.github.io/overturemaps-extract/)** — extract Overture Maps Foundation datasets
 
 ## Installation
 
