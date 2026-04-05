@@ -12,6 +12,7 @@ import { GeoPackageFormatHandler } from './formats/geopackage.js';
 import { ShapefileFormatHandler } from './formats/shapefile.js';
 import { KmlFormatHandler } from './formats/kml.js';
 import { DxfFormatHandler } from './formats/dxf.js';
+import { FlatGeobufFormatHandler } from './formats/flatgeobuf.js';
 import { SourceResolver } from './source_resolver.js';
 import { ParquetBboxReader } from './parquet_bbox_reader.js';
 
@@ -49,6 +50,7 @@ function getFormatHandler(format, opts) {
     case 'shapefile': return new ShapefileFormatHandler(opts);
     case 'kml': return new KmlFormatHandler(opts);
     case 'dxf': return new DxfFormatHandler(opts);
+    case 'flatgeobuf': return new FlatGeobufFormatHandler(opts);
     default: throw new Error(`Unsupported format: ${format}`);
   }
 }

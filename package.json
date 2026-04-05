@@ -55,6 +55,7 @@
     }
   },
   "dependencies": {
+    "flatgeobuf": "^4.4.0",
     "hyparquet": "^1.25.0",
     "hyparquet-compressors": "^1.0.0",
     "wa-sqlite-rtree": "^1.0.9"

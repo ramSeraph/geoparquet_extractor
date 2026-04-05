@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import * as flatbuffers from 'flatbuffers';
 import * as duckdb from 'duckdb-wasm-opfs-tempdir';
+import { geojson as fgbGeojson } from 'flatgeobuf';
 import { parquetMetadataAsync, parquetSchema } from 'hyparquet';
 import {
   GeoParquetExtractor,
   createDuckDBClient,
 } from '../src/index.js';
+import { Header as FgbHeader } from 'flatgeobuf/lib/mjs/flat-geobuf/header.js';
 import { FormatHandler } from '../src/formats/base.js';
 import { createMockGpkgWorker } from './helpers/gpkg_test_worker.js';
 import mvpWasmUrl from 'duckdb-wasm-opfs-tempdir/dist/duckdb-mvp.wasm?url';
@@ -705,6 +708,27 @@ describe('format handler end-to-end', () => {
     expect(geojson.features[0].geometry.type).toBe('Point');
     expect(geojson.features[0].properties.name).toBe('alpha');
     expect(geojson.features[1].properties.value).toBe(2);
+  });
+
+  it('writes indexed FlatGeobuf output from a GeoParquet 1.1 source', async () => {
+    const downloads = await renderFormat('flatgeobuf');
+    const blob = findDownload(downloads, '.fgb').blob;
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const headerBuffer = new flatbuffers.ByteBuffer(bytes);
+    headerBuffer.setPosition(8);
+    const header = FgbHeader.getSizePrefixedRootAsHeader(headerBuffer);
+
+    const features = [];
+    for await (const feature of fgbGeojson.deserialize(bytes)) {
+      features.push(feature);
+    }
+
+    expect(header.indexNodeSize()).toBeGreaterThan(0);
+    expect(Array.from(header.envelopeArray())).toHaveLength(4);
+    expect(features).toHaveLength(2);
+    expect(features[0].geometry.type).toBe('Point');
+    expect(features[0].properties.name).toBe('alpha');
+    expect(features[1].properties.value).toBe(2);
   });
 
   it('currently leaves GeoJSON properties unflattened even when flattenStructs is true', async () => {

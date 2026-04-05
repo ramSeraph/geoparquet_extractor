@@ -22,6 +22,7 @@ export { GeoPackageFormatHandler } from './formats/geopackage.js';
 export { ShapefileFormatHandler } from './formats/shapefile.js';
 export { KmlFormatHandler } from './formats/kml.js';
 export { DxfFormatHandler } from './formats/dxf.js';
+export { FlatGeobufFormatHandler } from './formats/flatgeobuf.js';
 
 // Utilities
 export {

@@ -223,29 +223,42 @@ export class FormatHandler {
    * @param {Object} opts
    * @param {string} opts.prefix - OPFS filename prefix
    * @param {string[]} [opts.extraColumns] - Additional SQL expressions for the SELECT
+   * @param {boolean} [opts.hilbertOrder] - Order rows by DuckDB ST_Hilbert within the requested bbox
    * @param {Function} opts.onProgress - Progress callback (0–100)
    * @param {Function} opts.onStatus - Status message callback
    * @returns {Promise<string>} opfs:// path to the intermediate parquet file
    */
-  async createIntermediateParquet({ prefix, extraColumns, onProgress, onStatus }) {
-    onStatus?.('Filtering data...');
+  async createIntermediateParquet({ prefix, extraColumns, hilbertOrder = false, onProgress, onStatus }) {
+    onStatus?.(hilbertOrder ? 'Filtering and spatially ordering data...' : 'Filtering data...');
     const tempPath = await this.createDuckdbOpfsFile(prefix, 'parquet');
 
     const stopTracker = this.startDiskProgressTracker(
-      onProgress, onStatus, 'Filtering data:', this.estimatedBytes
+      onProgress,
+      onStatus,
+      hilbertOrder ? 'Filtering and spatially ordering data:' : 'Filtering data:',
+      this.estimatedBytes
     );
     const extraSelect = extraColumns?.length
       ? extraColumns.join(', ') + ', '
       : '';
     const columnSelect = await this.buildColumnSelect();
+    const hilbertJoin = hilbertOrder
+      ? `,
+            (SELECT ST_Extent(ST_GeomFromText('${this.bboxWkt}')) AS extent) AS _hilbert_bounds`
+      : '';
+    const orderBy = hilbertOrder
+      ? `
+          ORDER BY ST_Hilbert(geometry, _hilbert_bounds.extent)`
+      : '';
     try {
       await this.duckdb.conn.query(`
         COPY (
           SELECT
             hex(ST_AsWKB(geometry)::BLOB) AS geom_wkb,
             ${extraSelect}${columnSelect}
-          FROM ${this.parquetSource}
+          FROM ${this.parquetSource}${hilbertJoin}
           WHERE ${this.bboxFilter}
+          ${orderBy}
         ) TO '${tempPath}' (FORMAT PARQUET, COMPRESSION ZSTD)
       `);
     } finally {

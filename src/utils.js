@@ -26,6 +26,7 @@ export const OPFS_PREFIX_TMP = opfsPrefix('dl_tmp_');
 export const OPFS_PREFIX_SHP_TMP = opfsPrefix('dl_shp_tmp_');
 export const OPFS_PREFIX_KML_TMP = opfsPrefix('dl_kml_tmp_');
 export const OPFS_PREFIX_DXF_TMP = opfsPrefix('dl_dxf_tmp_');
+export const OPFS_PREFIX_FGB_TMP = opfsPrefix('dl_fgb_tmp_');
 export const OPFS_PREFIX_TMPDIR = opfsPrefix('tmpdir_');
 
 /**

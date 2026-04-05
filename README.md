@@ -69,7 +69,7 @@ await extractor.extract({
 
 ## Features
 
-- **9 output formats**: GeoParquet (v1.1 & v2.0), GeoPackage, Shapefile, CSV, GeoJSON, GeoJSONSeq, KML, DXF
+- **9 output formats**: GeoParquet (v1.1 & v2.0), FlatGeobuf, GeoPackage, Shapefile, CSV, GeoJSON, GeoJSONSeq, KML, DXF
 - **Spatial filtering**: Bbox intersection with per-partition and per-row-group optimization
 - **Pluggable metadata**: Override how partition URLs and bboxes are resolved
 - **Extent visualization data**: Fetch partition/row-group bboxes as GeoJSON for map display
@@ -85,6 +85,7 @@ await extractor.extract({
 | GeoJSONSeq | `geojsonseq` | `.geojsonl` | Newline-delimited |
 | GeoParquet v1.1 | `geoparquet` | `.parquet` | With Hilbert spatial sort |
 | GeoParquet v2.0 | `geoparquet2` | `.parquet` | Native geometry encoding |
+| FlatGeobuf | `flatgeobuf` | `.fgb` | Packed Hilbert R-tree spatial index |
 | CSV | `csv` | `.csv` | WKT geometry column |
 | Shapefile | `shapefile` | `.shp` | 2 GB limit per component |
 | KML | `kml` | `.kml` | XML format |
@@ -255,6 +256,7 @@ Base class and per-format subclasses for advanced usage and subclassing. Normall
   - `cancel()` → Cancel the operation
 - **`CsvFormatHandler`** — CSV with WKT geometry column
 - **`GeoJsonFormatHandler`** — GeoJSON / GeoJSONSeq (`{ commaSeparated? }`)
+- **`FlatGeobufFormatHandler`** — FlatGeobuf with packed spatial index
 - **`GeoParquetFormatHandler`** — GeoParquet v1.1 or v2.0 (`{ version? }`)
 - **`GeoPackageFormatHandler`** — GeoPackage via wa-sqlite worker (`{ gpkgWorker? }`)
 - **`ShapefileFormatHandler`** — Shapefile (.shp/.dbf/.shx/.prj)

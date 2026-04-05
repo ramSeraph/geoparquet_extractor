@@ -11,6 +11,17 @@ export default defineConfig({
   assetsInclude: ['**/*.parquet'],
   optimizeDeps: {
     include: [
+      'flatbuffers',
+      'flatgeobuf',
+      'flatgeobuf/lib/mjs/constants.js',
+      'flatgeobuf/lib/mjs/generic/feature.js',
+      'flatgeobuf/lib/mjs/generic/featurecollection.js',
+      'flatgeobuf/lib/mjs/geojson/geometry.js',
+      'flatgeobuf/lib/mjs/flat-geobuf/column.js',
+      'flatgeobuf/lib/mjs/flat-geobuf/column-type.js',
+      'flatgeobuf/lib/mjs/flat-geobuf/crs.js',
+      'flatgeobuf/lib/mjs/flat-geobuf/geometry-type.js',
+      'flatgeobuf/lib/mjs/flat-geobuf/header.js',
       'wa-sqlite-rtree/dist/wa-sqlite-async.mjs',
       'wa-sqlite-rtree/src/sqlite-api.js',
       'wa-sqlite-rtree/src/examples/OPFSAdaptiveVFS.js',
