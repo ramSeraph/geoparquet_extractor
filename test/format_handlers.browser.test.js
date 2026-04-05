@@ -429,8 +429,8 @@ function installMemoryFsHarness(duckdbClient) {
 
   FormatHandler.prototype.removeOpfsFile = async function(opfsFileName) {
     const path = opfsFileName.replace('opfs://', '');
-    try { await duckdbClient.db.dropFile(path); } catch {} // eslint-disable-line no-empty
-    try { await root.removeEntry(path); } catch {} // eslint-disable-line no-empty
+    try { await duckdbClient.db.dropFile(path); } catch {}
+    try { await root.removeEntry(path); } catch {}
   };
 
   FormatHandler.prototype.releaseDuckdbOpfsFile = async function(opfsFileName) {

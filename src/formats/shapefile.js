@@ -175,8 +175,8 @@ export class ShapefileFormatHandler extends FormatHandler {
       }
     } finally {
       for (const { shpStream, dbfStream } of Object.values(opfsStreams)) {
-        try { await shpStream.close(); } catch (e) { /* may already be closed */ } // eslint-disable-line no-unused-vars
-        try { await dbfStream.close(); } catch (e) { /* may already be closed */ } // eslint-disable-line no-unused-vars
+        try { await shpStream.close(); } catch {}
+        try { await dbfStream.close(); } catch {}
       }
     }
 

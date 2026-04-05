@@ -117,7 +117,7 @@ export class DxfFormatHandler extends FormatHandler {
         rowOffset = rgEnd;
       }
     } finally {
-      try { await bodyStream.close(); } catch (e) { /* may already be closed */ } // eslint-disable-line no-unused-vars
+      try { await bodyStream.close(); } catch {}
     }
 
     this._bodyName = bodyName;

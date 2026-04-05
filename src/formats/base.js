@@ -161,13 +161,13 @@ export class FormatHandler {
     try {
       const root = await this._getRoot();
       await root.removeEntry(opfsFileName);
-    } catch (e) { /* may already be cleaned up */ } // eslint-disable-line no-unused-vars
+    } catch {}
   }
 
   async releaseDuckdbOpfsFile(opfsFileName) {
     try {
       await this.duckdb.db.dropFile(opfsFileName);
-    } catch (e) { /* db terminated or file already gone */ } // eslint-disable-line no-unused-vars
+    } catch {}
     this._duckdbRegisteredPaths.delete(opfsFileName);
   }
 
@@ -335,7 +335,7 @@ export class FormatHandler {
         URL.revokeObjectURL(url);
         const root = await this._getRoot();
         for (const name of opfsFiles) {
-          try { await root.removeEntry(name); } catch (e) { /* ignore */ } // eslint-disable-line no-unused-vars
+          try { await root.removeEntry(name); } catch {}
         }
       }, cleanupDelayMs);
 
@@ -370,7 +370,7 @@ export class FormatHandler {
       if (this._downloadedFiles.has(name)) continue;
       try {
         await root.removeEntry(name, { recursive: true });
-      } catch (e) { /* may already be cleaned up */ } // eslint-disable-line no-unused-vars
+      } catch {}
     }
   }
 }
