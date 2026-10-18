@@ -1,0 +1,6 @@
+{
+  "package": "@duckdb/duckdb-wasm",
+  "version": "1.33.1-dev4.0",
+  "commit": "fa229d00196a6345fa8160941cc1c38ec5460405",
+  "integrity": "sha512-Ie1UWGnz3/qZahkmE2toqIqK40os7zaRhp4rT4SbEgA+KUOmPeE2wTkGy1trYVUFhdV/BJiM4nyZdGZ1vTc5sg=="
+}

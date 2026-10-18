@@ -1,0 +1,13 @@
+DuckDB-Wasm is Copyright 2018-2025 Stichting DuckDB Foundation, licensed under MIT.
+The upstream package, version, commit and npm integrity are recorded in upstream.json.
+
+OPFS spill support is based on the pre-registered temporary handle pool proposed
+by dt in https://github.com/duckdb/duckdb-wasm/pull/2138 and previously shipped in
+ramSeraph/duckdb-wasm, commit 02b33e04.
+
+This distribution maintains an explicit-registration patch with additional
+handle ownership, reset, refill, directory-isolation and direct-I/O fixes in
+geoparquet-extractor. It uses upstream Wasm and rebuilds the client and workers
+from the pinned npm package's original sources and Emscripten glue.
+
+Other bundled dependencies retain their notices in the licenses directory.
