@@ -25,7 +25,7 @@ Browser
 
 ### Key Internal Dependencies
 
-- **DuckDB-WASM with OPFS temp directory** — uses [duckdb-wasm-opfs-tempdir](https://www.npmjs.com/package/duckdb-wasm-opfs-tempdir) which supports `SET temp_directory = 'opfs://...'` for processing datasets larger than available memory. DuckDB's `spatial` extension is loaded at runtime for geometry operations (`ST_AsWKB`, `ST_AsGeoJSON`, `ST_Hilbert`, etc.).
+- **DuckDB-WASM with OPFS temp directory** — ships a patched, pinned upstream DuckDB runtime alongside the extractor. It supports `SET temp_directory = 'opfs://...'` for processing datasets larger than available memory. DuckDB's `spatial` extension is loaded at runtime for geometry operations (`ST_AsWKB`, `ST_AsGeoJSON`, `ST_Hilbert`, etc.).
 - **[sqwab](https://github.com/ramSeraph/sqwab)** — wa-sqlite with R-tree support for GeoPackage output. Runs in a dedicated Web Worker using `OPFSAdaptiveVFS` for file I/O.
 - **[hyparquet](https://github.com/hyparam/hyparquet)** — pure-JS parquet reader used in the GeoPackage worker to read intermediate files from OPFS.
 - **[Apache Arrow](https://arrow.apache.org/)** — columnar data handling.
@@ -45,15 +45,10 @@ npm install geoparquet-extractor
 ## Quick Start
 
 ```javascript
-import { GeoParquetExtractor, createDuckDBClient } from 'geoparquet-extractor';
+import { GeoParquetExtractor, initDuckDB } from 'geoparquet-extractor';
 
-// You initialize DuckDB yourself
-import * as duckdb from 'duckdb-wasm-opfs-tempdir';
-
-const db = /* your initialized AsyncDuckDB instance */;
-const client = await createDuckDBClient(db, {
-  extensions: ['spatial', 'httpfs'],
-});
+// Loads the DuckDB client, workers and Wasm shipped with this package.
+const client = await initDuckDB({ memoryLimitMB: 256 });
 
 const extractor = new GeoParquetExtractor({ duckdb: client });
 
@@ -73,7 +68,7 @@ await extractor.extract({
 - **Spatial filtering**: Bbox intersection with per-partition and per-row-group optimization
 - **Pluggable metadata**: Override how partition URLs and bboxes are resolved
 - **Extent visualization data**: Fetch partition/row-group bboxes as GeoJSON for map display
-- **DuckDB-powered**: Spatial SQL queries via DuckDB WASM (you provide the instance)
+- **DuckDB-powered**: Packaged DuckDB WASM with OPFS spilling; custom instances remain supported
 - **Self-contained GeoPackage worker**: wa-sqlite-rtree bundled into the worker — no CDN needed
 
 ## Formats
@@ -93,31 +88,41 @@ await extractor.extract({
 
 ## DuckDB Setup
 
-The library does NOT bundle DuckDB WASM. You initialize it yourself and pass it in:
+DuckDB's patched client, worker scripts and matching Wasm files are included in this package. There is no separate DuckDB package to install. `initDuckDB()` loads these assets lazily; Vite application builds copy the referenced assets into their output. For direct browser imports, serve the package's `dist/` tree intact.
 
 ```javascript
-import { createDuckDBClient } from 'geoparquet-extractor';
-import * as duckdb from 'duckdb-wasm-opfs-tempdir';
+import { initDuckDB } from 'geoparquet-extractor';
 
-// Standard duckdb-wasm-opfs-tempdir init
-const MANUAL_BUNDLES = { /* your bundle config */ };
-const bundle = await duckdb.selectBundle(MANUAL_BUNDLES);
-const worker = new Worker(bundle.mainWorker);
-const logger = new duckdb.ConsoleLogger();
-const db = new duckdb.AsyncDuckDB(logger, worker);
-await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-
-// Wrap it for the library
-const client = await createDuckDBClient(db, {
-  extensions: ['spatial', 'httpfs'],
-});
+const client = await initDuckDB({ memoryLimitMB: 256 });
+await client.init(); // Connect and load spatial/httpfs; extractors also call this.
 ```
+
+DuckDB extensions still load from DuckDB's extension server at runtime.
 
 ### Custom DuckDB Builds
 
-The `duckdb-wasm-opfs-tempdir` package supports `SET temp_directory = 'opfs://...'` for large downloads that exceed browser memory limits. OPFS spilling requires a runtime that also exposes `registerOPFSTempDir`.
+The existing `initDuckDB(distributionUrl, options)` overload and `createDuckDBClient(db, options)` remain available. An externally supplied runtime must expose `registerOPFSTempDir` if you use OPFS spilling. Use the packaged API for manual initialization:
 
-When configuring a temporary directory, the adapter and extractor register the OPFS handle pool before setting `temp_directory`. This is required for the default in-memory DuckDB setup. Pool sizes count file handles; they are independent of `memory_limit`.
+```javascript
+import * as duckdb from 'geoparquet-extractor/duckdb';
+import { createDuckDBClient } from 'geoparquet-extractor';
+
+const bundle = await duckdb.selectBundle(duckdb.getLocalBundles());
+const worker = new Worker(bundle.mainWorker);
+const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+const client = createDuckDBClient(db, { memoryLimitMB: 256 });
+```
+
+When configuring a temp directory, the adapter explicitly registers its OPFS handle pool before setting `temp_directory`. Pool sizes count spare file handles, not memory pages or megabytes. Re-registering the same pool is safe. Reset DuckDB before replacing a pool with open files; reset removes its native file registrations, closes its handles and deletes its private scratch subdirectory. Pre-existing files in the parent directory are preserved.
+
+The packaged runtime defaults to `useDirectIO: true` and `maximumThreads: 1` on initialization, open and reset. Direct I/O makes spill files bypass DuckDB-Wasm's native file-page cache, where repeated low-memory sorts otherwise stalled in browser regression tests. One thread also avoids reconfiguring an already-running COI thread pool during startup. These settings do not change `memory_limit`. Custom runtimes should be opened with `await db.open({ useDirectIO: true, maximumThreads: 1 })` before creating connections if they use this OPFS patch. The COI build remains experimental; multi-threaded spilling is not covered by these checks.
+
+### Maintaining the DuckDB patch
+
+`vendor/duckdb/upstream.json` pins upstream npm version `1.33.1-dev4.0` and its integrity. This is the nearest published upstream build after the former fork's `v1.33.0` base; its runtime source differs only in an S3 helper. `npm run build:duckdb` reconstructs original source and generated Emscripten JavaScript from the pinned package's source maps, applies `vendor/duckdb/opfs.patch`, adds `opfs_pool.js`, and rebuilds the browser client and workers. Matching upstream Wasm files are copied unchanged. The build requires Git, but does not clone the fork, compile C++, or publish another package.
+
+Keep the upstream pin, lockfile and patch together when upgrading. Missing source inputs or a patch that no longer applies fail the build. Final extractor package metadata is embedded before bundling; `dist/duckdb/build.json` records the upstream pin and patch hash.
 
 > **Choosing `memory_limit`:** Treat browser-side defaults as heuristics. They are **not** derived from DuckDB temp-directory page or block sizes. In DuckDB, `memory_limit` controls how much data stays in memory before spilling, while `temp_directory` only controls where spill files are written. For DuckDB-Wasm, conservative defaults are usually driven by browser/WebAssembly memory limits instead.
 
@@ -237,9 +242,9 @@ Base class with working defaults. Override to customize metadata resolution.
 
 Wraps an `AsyncDuckDB` instance into the library's DuckDBClient interface.
 
-### `initDuckDB(duckdbDist, options?)`
+### `initDuckDB(options?)` / `initDuckDB(duckdbDist, options?)`
 
-Creates a DuckDBClient by loading DuckDB-WASM from a distribution URL. Handles bundle selection, worker creation, and WASM instantiation.
+Creates a DuckDBClient using the packaged runtime by default, or an explicit distribution URL. Options include `memoryLimitMB` and `tempDirectory`. Handles bundle selection, worker creation, and Wasm instantiation; `client.init()` connects and loads extensions.
 
 ### `proxyUrl(url)`
 

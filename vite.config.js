@@ -8,6 +8,9 @@ import { copyFileSync, existsSync } from 'fs';
 const isWorkerBuild = process.env.BUILD_TARGET === 'worker';
 
 export default defineConfig({
+  resolve: {
+    alias: [{ find: './duckdb.js', replacement: resolve(__dirname, 'dist/duckdb.js') }],
+  },
   assetsInclude: ['**/*.parquet'],
   optimizeDeps: {
     include: [
@@ -51,10 +54,11 @@ export default defineConfig({
       fileName: isWorkerBuild ? 'gpkg_worker' : 'geoparquet-extractor',
     },
     rollupOptions: {
-      external: isWorkerBuild ? [] : ['duckdb-wasm-opfs-tempdir'],
+      // Emitted separately with static worker/Wasm URLs for downstream bundlers.
+      external: isWorkerBuild ? [] : ['./duckdb.js'],
     },
     outDir: 'dist',
-    emptyOutDir: !isWorkerBuild,
+    emptyOutDir: !isWorkerBuild && !process.env.KEEP_RUNTIME,
     target: 'esnext',
     minify: false,
     sourcemap: true,

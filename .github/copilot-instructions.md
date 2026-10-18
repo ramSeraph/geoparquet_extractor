@@ -33,8 +33,8 @@ Browser-only library for extracting and converting spatial data from remote GeoP
 
 ## Dependencies
 
-- **Runtime**: `hyparquet`, `hyparquet-compressors`, `wa-sqlite-rtree`
-- **Peer**: `duckdb-wasm-opfs-tempdir` (optional — consumer provides DuckDB)
+- **Runtime**: `hyparquet`, `hyparquet-compressors`, `wa-sqlite-rtree`, `flatgeobuf`, `apache-arrow`
+- **DuckDB**: Built from an exact upstream dev dependency plus `vendor/duckdb/opfs.patch` and `opfs_pool.js`; client, workers and matching Wasm ship in `dist/duckdb/`. No fork npm package or consumer install scripts.
 - **Dev**: `vite`, `vitest`, `typescript` (for declaration generation only), `jsdom`
 
 ## When Making Changes

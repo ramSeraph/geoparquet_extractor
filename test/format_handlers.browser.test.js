@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as flatbuffers from 'flatbuffers';
-import * as duckdb from 'duckdb-wasm-opfs-tempdir';
+import * as duckdb from '../dist/duckdb.js';
 import { geojson as fgbGeojson } from 'flatgeobuf';
 import { parquetMetadataAsync, parquetSchema } from 'hyparquet';
 import {
@@ -10,13 +10,13 @@ import {
 import { Header as FgbHeader } from 'flatgeobuf/lib/mjs/flat-geobuf/header.js';
 import { FormatHandler } from '../src/formats/base.js';
 import { createMockGpkgWorker } from './helpers/gpkg_test_worker.js';
-import mvpWasmUrl from 'duckdb-wasm-opfs-tempdir/dist/duckdb-mvp.wasm?url';
-import mvpWorkerUrl from 'duckdb-wasm-opfs-tempdir/dist/duckdb-browser-mvp.worker.js?url';
-import ehWasmUrl from 'duckdb-wasm-opfs-tempdir/dist/duckdb-eh.wasm?url';
-import ehWorkerUrl from 'duckdb-wasm-opfs-tempdir/dist/duckdb-browser-eh.worker.js?url';
-import coiWasmUrl from 'duckdb-wasm-opfs-tempdir/dist/duckdb-coi.wasm?url';
-import coiWorkerUrl from 'duckdb-wasm-opfs-tempdir/dist/duckdb-browser-coi.worker.js?url';
-import coiPthreadWorkerUrl from 'duckdb-wasm-opfs-tempdir/dist/duckdb-browser-coi.pthread.worker.js?url';
+import mvpWasmUrl from '../dist/duckdb/duckdb-mvp.wasm?url';
+import mvpWorkerUrl from '../dist/duckdb/duckdb-browser-mvp.worker.js?url';
+import ehWasmUrl from '../dist/duckdb/duckdb-eh.wasm?url';
+import ehWorkerUrl from '../dist/duckdb/duckdb-browser-eh.worker.js?url';
+import coiWasmUrl from '../dist/duckdb/duckdb-coi.wasm?url';
+import coiWorkerUrl from '../dist/duckdb/duckdb-browser-coi.worker.js?url';
+import coiPthreadWorkerUrl from '../dist/duckdb/duckdb-browser-coi.pthread.worker.js?url';
 import waSqliteWasmUrl from 'wa-sqlite-rtree/dist/wa-sqlite-async.wasm?url';
 import sampleParquetUrl from './fixtures/sample-gp11.parquet?url';
 import pointParquetUrl from './fixtures/sample-point.parquet?url';

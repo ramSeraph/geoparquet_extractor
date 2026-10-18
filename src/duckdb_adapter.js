@@ -20,11 +20,11 @@
  */
 
 /**
- * Create a DuckDBClient by loading DuckDB-WASM from a distribution URL.
+ * Create a DuckDBClient using the packaged DuckDB runtime, or a distribution URL.
  * Handles bundle selection, worker creation, and WASM instantiation.
  *
- * @param {string} duckdbDist - Base URL of the duckdb-wasm distribution
- *   (e.g. 'https://ramseraph.github.io/duckdb-wasm/v1.33.0-opfs-tempdir')
+ * @param {string | {tempDirectory?: string, memoryLimitMB?: number}} [duckdbDist]
+ *   Optional distribution URL, or options for the packaged runtime.
  * @param {object} [options]
  * @param {string} [options.tempDirectory] - OPFS temp directory path
  * @param {number} [options.memoryLimitMB] - DuckDB memory limit in MB; a runtime tuning knob for browser/Wasm memory pressure, not something derived from temp-directory page sizes
@@ -37,7 +37,7 @@ const OPFS_TEMP_POOL_MIN = 32;
 
 /**
  * Register an OPFS temp directory with DuckDB before setting temp_directory.
- * Explicit registration is needed for the default in-memory DuckDB setup.
+ * The packaged DuckDB runtime requires this for OPFS-backed spill directories.
  *
  * @param {object} db - AsyncDuckDB instance
  * @param {(sql: string) => Promise<any>} query - Query executor
@@ -49,48 +49,72 @@ export async function configureDuckDBTempDirectory(db, query, tempDirectory) {
     await query("RESET temp_directory;");
     return;
   }
+  if (typeof db.registerOPFSTempDir !== 'function') {
+    throw new Error('OPFS spilling requires the DuckDB runtime shipped with geoparquet-extractor');
+  }
   await db.registerOPFSTempDir(tempDirectory, OPFS_TEMP_POOL_MAX, OPFS_TEMP_POOL_MIN);
   await query(`SET temp_directory = '${tempDirectory.replace(/'/g, "''")}';`);
 }
 
 export async function initDuckDB(duckdbDist, options = {}) {
-  const base = duckdbDist.replace(/\/$/, '');
+  if (duckdbDist && typeof duckdbDist === 'object') {
+    options = duckdbDist;
+    duckdbDist = undefined;
+  }
+  const packaged = !duckdbDist;
+  const key = packaged ? 'packaged' : duckdbDist;
+  if (packaged && !_bundleCache.has(key)) {
+    _bundleCache.set(key, import('./duckdb.js').then(module => module.loadBundledDuckDB()));
+  }
+  if (!packaged) {
+    const base = duckdbDist.replace(/\/$/, '');
 
-  if (!_bundleCache.has(base)) {
-    _bundleCache.set(base, (async () => {
-      const duckdb = await import(`${base}/duckdb-browser.mjs`);
-      const bundles = {
-        mvp: {
-          mainModule: `${base}/duckdb-mvp.wasm`,
-          mainWorker: `${base}/duckdb-browser-mvp.worker.js`,
-        },
-        eh: {
-          mainModule: `${base}/duckdb-eh.wasm`,
-          mainWorker: `${base}/duckdb-browser-eh.worker.js`,
-        },
-        coi: {
-          mainModule: `${base}/duckdb-coi.wasm`,
-          mainWorker: `${base}/duckdb-browser-coi.worker.js`,
-          pthreadWorker: `${base}/duckdb-browser-coi.pthread.worker.js`,
-        },
-      };
-      const bundle = await duckdb.selectBundle(bundles);
-      return { duckdb, bundle };
-    })());
+    if (!_bundleCache.has(key)) {
+      _bundleCache.set(key, (async () => {
+        const duckdb = await import(/* @vite-ignore */ `${base}/duckdb-browser.mjs`);
+        const bundles = {
+          mvp: {
+            mainModule: `${base}/duckdb-mvp.wasm`,
+            mainWorker: `${base}/duckdb-browser-mvp.worker.js`,
+          },
+          eh: {
+            mainModule: `${base}/duckdb-eh.wasm`,
+            mainWorker: `${base}/duckdb-browser-eh.worker.js`,
+          },
+          coi: {
+            mainModule: `${base}/duckdb-coi.wasm`,
+            mainWorker: `${base}/duckdb-browser-coi.worker.js`,
+            pthreadWorker: `${base}/duckdb-browser-coi.pthread.worker.js`,
+          },
+        };
+        const bundle = await duckdb.selectBundle(bundles);
+        return { duckdb, bundle };
+      })());
+    }
   }
 
-  const { duckdb, bundle } = await _bundleCache.get(base);
+  let duckdb, bundle;
+  try {
+    ({ duckdb, bundle } = await _bundleCache.get(key));
+  } catch (error) {
+    _bundleCache.delete(key);
+    throw error;
+  }
 
   async function bootstrap() {
     const workerUrl = URL.createObjectURL(
-      new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
+      new Blob([`importScripts(${JSON.stringify(bundle.mainWorker)});`], { type: 'text/javascript' })
     );
+    let worker;
     try {
-      const worker = new Worker(workerUrl);
+      worker = new Worker(workerUrl);
       const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
       const db = new duckdb.AsyncDuckDB(logger, worker);
       await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
       return { db, worker };
+    } catch (error) {
+      worker?.terminate();
+      throw error;
     } finally {
       URL.revokeObjectURL(workerUrl);
     }
@@ -112,7 +136,7 @@ export async function initDuckDB(duckdbDist, options = {}) {
  *
  * This adapter will handle connection creation and extension loading.
  *
- * @param {object} db - An AsyncDuckDB instance from duckdb-wasm-opfs-tempdir
+ * @param {object} db - An initialized AsyncDuckDB instance
  * @param {object} [options]
  * @param {string} [options.tempDirectory] - OPFS temp directory path (e.g., 'opfs://tmpdir_xxx')
  * @param {number} [options.memoryLimitMB] - DuckDB memory limit in MB; a runtime tuning knob for browser/Wasm memory pressure, not something derived from temp-directory page sizes

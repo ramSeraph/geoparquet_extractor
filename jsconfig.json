@@ -15,5 +15,5 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
   "include": ["src/**/*.js"],
-  "exclude": ["node_modules", "dist", "test", "src/workers/**"]
+  "exclude": ["node_modules", "dist", "test", "src/workers/**", "src/duckdb.js"]
 }

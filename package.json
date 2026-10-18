@@ -8,22 +8,30 @@
   "types": "dist/types/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/geoparquet-extractor.js",
-      "types": "./dist/types/index.d.ts"
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/geoparquet-extractor.js"
     },
-    "./gpkg-worker": "./dist/gpkg_worker.js"
+    "./gpkg-worker": "./dist/gpkg_worker.js",
+    "./duckdb": {
+      "types": "./dist/duckdb.d.ts",
+      "import": "./dist/duckdb.js"
+    },
+    "./duckdb/*": "./dist/duckdb/*"
   },
   "files": [
     "dist/"
   ],
   "scripts": {
-    "dev": "vite build --watch",
-    "build": "vite build && BUILD_TARGET=worker vite build && npm run types",
+    "dev": "npm run build && KEEP_RUNTIME=1 vite build --watch",
+    "build": "vite build && BUILD_TARGET=worker vite build && npm run build:duckdb && npm run types",
     "types": "tsc --project jsconfig.json --declaration --emitDeclarationOnly --allowJs --outDir dist/types",
     "test": "vitest run --testTimeout=60000 --hookTimeout=60000",
     "test:watch": "vitest --testTimeout=60000 --hookTimeout=60000",
     "lint": "eslint src/",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "build:duckdb": "node scripts/build-duckdb.mjs",
+    "pretest": "npm run build",
+    "pretest:watch": "npm run build"
   },
   "keywords": [
     "geoparquet",
@@ -46,28 +54,24 @@
     "type": "git",
     "url": "https://github.com/ramSeraph/geoparquet_extractor"
   },
-  "peerDependencies": {
-    "duckdb-wasm-opfs-tempdir": ">=1.33.0"
-  },
-  "peerDependenciesMeta": {
-    "duckdb-wasm-opfs-tempdir": {
-      "optional": true
-    }
-  },
   "dependencies": {
+    "apache-arrow": "17.0.0",
     "flatgeobuf": "^4.4.0",
     "hyparquet": "^1.25.0",
     "hyparquet-compressors": "^1.0.0",
     "wa-sqlite-rtree": "^1.0.9"
   },
   "devDependencies": {
+    "@duckdb/duckdb-wasm": "1.33.1-dev4.0",
     "@vitest/browser": "^3.2.4",
-    "duckdb-wasm-opfs-tempdir": "^1.33.0-1",
+    "esbuild": "0.25.12",
     "eslint": "^10.1.0",
+    "js-sha256": "0.11.1",
     "jsdom": "^29.0.1",
     "playwright": "^1.58.2",
     "typescript": "^5.9.3",
     "vite": "^6.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "wasm-feature-detect": "1.8.0"
   }
 }
