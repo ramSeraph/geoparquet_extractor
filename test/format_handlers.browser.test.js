@@ -728,7 +728,13 @@ describe('format handler end-to-end', () => {
     expect(features).toHaveLength(2);
     expect(features[0].geometry.type).toBe('Point');
     expect(features[0].properties.name).toBe('alpha');
+    // Regression: the Hilbert-ordering bounds used to leak into feature properties
+    // as a synthetic extent/extents column, which is not part of FlatGeobuf output.
+    expect(features[0].properties.extent).toBeUndefined();
+    expect(features[0].properties.extents).toBeUndefined();
     expect(features[1].properties.value).toBe(2);
+    expect(features[1].properties.extent).toBeUndefined();
+    expect(features[1].properties.extents).toBeUndefined();
   });
 
   it('currently leaves GeoJSON properties unflattened even when flattenStructs is true', async () => {

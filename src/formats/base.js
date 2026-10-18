@@ -242,21 +242,24 @@ export class FormatHandler {
       ? extraColumns.join(', ') + ', '
       : '';
     const columnSelect = await this.buildColumnSelect();
-    const hilbertJoin = hilbertOrder
-      ? `,
-            (SELECT ST_Extent(ST_GeomFromText('${this.bboxWkt}')) AS extent) AS _hilbert_bounds`
+    const hilbertWith = hilbertOrder
+      ? `
+          WITH _hilbert_bounds AS (
+            SELECT ST_Extent(ST_GeomFromText('${this.bboxWkt}')) AS extent
+          )`
       : '';
     const orderBy = hilbertOrder
       ? `
-          ORDER BY ST_Hilbert(geometry, _hilbert_bounds.extent)`
+          ORDER BY ST_Hilbert(geometry, (SELECT extent FROM _hilbert_bounds))`
       : '';
     try {
       await this.duckdb.conn.query(`
         COPY (
+          ${hilbertWith}
           SELECT
             hex(ST_AsWKB(geometry)::BLOB) AS geom_wkb,
             ${extraSelect}${columnSelect}
-          FROM ${this.parquetSource}${hilbertJoin}
+          FROM ${this.parquetSource}
           WHERE ${this.bboxFilter}
           ${orderBy}
         ) TO '${tempPath}' (FORMAT PARQUET, COMPRESSION ZSTD)
