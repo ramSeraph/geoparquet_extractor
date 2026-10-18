@@ -124,6 +124,8 @@ The packaged runtime defaults to `useDirectIO: true` and `maximumThreads: 1` on 
 
 Keep the upstream pin, lockfile and patch together when upgrading. Missing source inputs or a patch that no longer applies fail the build. Final extractor package metadata is embedded before bundling; `dist/duckdb/build.json` records the upstream pin and patch hash.
 
+Run `npm test` for unit and browser integration tests, then `npm run test:package` to install the tarball in a clean consumer and verify TypeScript, Vite asset emission, real OPFS spilling in Chrome and WebKit, and MVP/EH/COI workers in Chrome. WebKit's OPFS checks use a persistent context because Playwright's private contexts do not support OPFS. Install Playwright Chromium and WebKit first (`npx playwright install chromium webkit`). To use installed Chrome locally, set `CHROME_CHANNEL=chrome`; the package check still requires Playwright WebKit. The release workflow publishes that verified tarball. Consumers do not run patching or compilation during installation.
+
 > **Choosing `memory_limit`:** Treat browser-side defaults as heuristics. They are **not** derived from DuckDB temp-directory page or block sizes. In DuckDB, `memory_limit` controls how much data stays in memory before spilling, while `temp_directory` only controls where spill files are written. For DuckDB-Wasm, conservative defaults are usually driven by browser/WebAssembly memory limits instead.
 
 ## GeoPackage Worker

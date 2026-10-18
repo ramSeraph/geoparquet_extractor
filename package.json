@@ -31,7 +31,8 @@
     "prepublishOnly": "npm run build",
     "build:duckdb": "node scripts/build-duckdb.mjs",
     "pretest": "npm run build",
-    "pretest:watch": "npm run build"
+    "pretest:watch": "npm run build",
+    "test:package": "node scripts/test-package.mjs"
   },
   "keywords": [
     "geoparquet",

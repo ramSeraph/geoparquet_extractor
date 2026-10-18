@@ -33,6 +33,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Browser suites share an origin and some replace its storage API with a
+    // memory harness. Keep real-OPFS and harness suites in separate runs.
+    fileParallelism: false,
     testTimeout: 60000,
     hookTimeout: 60000,
     browser: {
@@ -41,7 +44,13 @@ export default defineConfig({
       headless: true,
       screenshotFailures: false,
       instances: [
-        { browser: 'webkit' },
+        { browser: 'chromium', ...(process.env.CHROME_CHANNEL ? { launch: { channel: process.env.CHROME_CHANNEL } } : {}) },
+        ...(process.env.CHROME_CHANNEL ? [] : [{
+          browser: 'webkit',
+          // Playwright WebKit's ephemeral contexts do not support OPFS.
+          // test:package covers real OPFS in a persistent WebKit context.
+          exclude: ['test/duckdb_runtime.browser.test.js'],
+        }]),
       ],
     },
   },

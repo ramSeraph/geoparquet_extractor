@@ -42,4 +42,5 @@ Browser-only library for extracting and converting spatial data from remote GeoP
 - Run `npm test` to validate — all tests should pass.
 - Update JSDoc types when changing data structures.
 - Update `README.md` API docs if public interfaces change.
+- `npm run test:package` packs the built output, installs it in a clean consumer, checks TypeScript and Vite integration, and exercises OPFS in Chromium and persistent WebKit, plus all three DuckDB worker variants in Chromium.
 - Format handlers that stream via hyparquet (Shapefile, KML, DXF) iterate `metadata.row_groups` and use `num_rows` for row offset calculations — be careful changing row group structures there.
