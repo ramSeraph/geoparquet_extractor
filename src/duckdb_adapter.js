@@ -27,11 +27,31 @@
  *   (e.g. 'https://ramseraph.github.io/duckdb-wasm/v1.33.0-opfs-tempdir')
  * @param {object} [options]
  * @param {string} [options.tempDirectory] - OPFS temp directory path
- * @param {number} [options.memoryLimitMB] - DuckDB memory limit in MB
+ * @param {number} [options.memoryLimitMB] - DuckDB memory limit in MB; a runtime tuning knob for browser/Wasm memory pressure, not something derived from temp-directory page sizes
  * @returns {Promise<DuckDBClient>}
  */
 // Cache bundle resolution per distribution URL
 const _bundleCache = new Map();
+const OPFS_TEMP_POOL_MAX = 128;
+const OPFS_TEMP_POOL_MIN = 32;
+
+/**
+ * Register an OPFS temp directory with DuckDB before setting temp_directory.
+ * Explicit registration is needed for the default in-memory DuckDB setup.
+ *
+ * @param {object} db - AsyncDuckDB instance
+ * @param {(sql: string) => Promise<any>} query - Query executor
+ * @param {string | undefined} tempDirectory - Temp directory path
+ * @returns {Promise<void>}
+ */
+export async function configureDuckDBTempDirectory(db, query, tempDirectory) {
+  if (!tempDirectory) {
+    await query("RESET temp_directory;");
+    return;
+  }
+  await db.registerOPFSTempDir(tempDirectory, OPFS_TEMP_POOL_MAX, OPFS_TEMP_POOL_MIN);
+  await query(`SET temp_directory = '${tempDirectory.replace(/'/g, "''")}';`);
+}
 
 export async function initDuckDB(duckdbDist, options = {}) {
   const base = duckdbDist.replace(/\/$/, '');
@@ -95,7 +115,7 @@ export async function initDuckDB(duckdbDist, options = {}) {
  * @param {object} db - An AsyncDuckDB instance from duckdb-wasm-opfs-tempdir
  * @param {object} [options]
  * @param {string} [options.tempDirectory] - OPFS temp directory path (e.g., 'opfs://tmpdir_xxx')
- * @param {number} [options.memoryLimitMB] - DuckDB memory limit in MB
+ * @param {number} [options.memoryLimitMB] - DuckDB memory limit in MB; a runtime tuning knob for browser/Wasm memory pressure, not something derived from temp-directory page sizes
  * @param {Worker} [options._worker] - Internal: worker reference for terminate()
  * @returns {DuckDBClient}
  */
@@ -138,8 +158,10 @@ export function createDuckDBClient(db, options = {}) {
       await _conn.query('SET arrow_large_buffer_size=true;');
 
       if (options.tempDirectory) {
-        await _conn.query(`SET temp_directory = '${options.tempDirectory}';`);
+        await configureDuckDBTempDirectory(_db, sql => _conn.query(sql), options.tempDirectory);
       }
+      // memory_limit is a high-level execution cap; temp_directory only affects
+      // where spill files are written after that cap is exceeded.
       if (options.memoryLimitMB) {
         await _conn.query(`SET memory_limit = '${options.memoryLimitMB}MB';`);
       }

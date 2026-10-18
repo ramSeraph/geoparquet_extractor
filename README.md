@@ -115,7 +115,11 @@ const client = await createDuckDBClient(db, {
 
 ### Custom DuckDB Builds
 
-The `duckdb-wasm-opfs-tempdir` package supports `SET temp_directory = 'opfs://...'` for large downloads that exceed browser memory limits. The library's `createDuckDBClient` adapter works with any DuckDB WASM build that provides `AsyncDuckDB`.
+The `duckdb-wasm-opfs-tempdir` package supports `SET temp_directory = 'opfs://...'` for large downloads that exceed browser memory limits. OPFS spilling requires a runtime that also exposes `registerOPFSTempDir`.
+
+When configuring a temporary directory, the adapter and extractor register the OPFS handle pool before setting `temp_directory`. This is required for the default in-memory DuckDB setup. Pool sizes count file handles; they are independent of `memory_limit`.
+
+> **Choosing `memory_limit`:** Treat browser-side defaults as heuristics. They are **not** derived from DuckDB temp-directory page or block sizes. In DuckDB, `memory_limit` controls how much data stays in memory before spilling, while `temp_directory` only controls where spill files are written. For DuckDB-Wasm, conservative defaults are usually driven by browser/WebAssembly memory limits instead.
 
 ## GeoPackage Worker
 

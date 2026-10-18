@@ -388,6 +388,7 @@ function installMemoryFsHarness(duckdbClient) {
   const originalGetOpfsHandle = FormatHandler.prototype.getOpfsHandle;
   const originalRemoveOpfsFile = FormatHandler.prototype.removeOpfsFile;
   const originalReleaseDuckdbOpfsFile = FormatHandler.prototype.releaseDuckdbOpfsFile;
+  const originalRegisterOPFSTempDir = duckdbClient.db.registerOPFSTempDir?.bind(duckdbClient.db);
 
   if (!hadStorage) {
     Object.defineProperty(navigator, 'storage', {
@@ -398,6 +399,12 @@ function installMemoryFsHarness(duckdbClient) {
   }
 
   storage.getDirectory = async () => root;
+
+  if (originalRegisterOPFSTempDir) {
+    // The harness replaces OPFS file access above FormatHandler, so DuckDB's
+    // native OPFS temp-dir registration would bypass the fake filesystem.
+    duckdbClient.db.registerOPFSTempDir = async () => {};
+  }
 
   FormatHandler.prototype.createDuckdbOpfsFile = async function(prefix, ext) {
     const path = `${prefix}${this.sessionId}_${Date.now()}.${ext}`;
@@ -451,6 +458,9 @@ function installMemoryFsHarness(duckdbClient) {
     FormatHandler.prototype.getOpfsHandle = originalGetOpfsHandle;
     FormatHandler.prototype.removeOpfsFile = originalRemoveOpfsFile;
     FormatHandler.prototype.releaseDuckdbOpfsFile = originalReleaseDuckdbOpfsFile;
+    if (originalRegisterOPFSTempDir) {
+      duckdbClient.db.registerOPFSTempDir = originalRegisterOPFSTempDir;
+    }
   };
 }
 

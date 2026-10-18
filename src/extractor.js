@@ -3,6 +3,7 @@
 
 import { proxyUrl } from './proxy.js';
 import { OPFS_PREFIX_TMPDIR, getOpfsPrefixes } from './utils.js';
+import { configureDuckDBTempDirectory } from './duckdb_adapter.js';
 import { ScopedProgress } from './scoped_progress.js';
 import { SizeGetter } from './size_getter.js';
 import { CsvFormatHandler } from './formats/csv.js';
@@ -78,7 +79,7 @@ function extractSessionId(name) {
  * @property {import('./parquet_bbox_reader.js').ParquetBboxReader} [bboxReader] - Optional parquet bbox reader
  * @property {string} [gpkgWorkerUrl] - URL for GeoPackage worker (or Worker instance)
  * @property {Worker} [gpkgWorker] - Pre-constructed GeoPackage Worker instance
- * @property {number} [memoryLimitMB] - DuckDB memory limit in MB
+ * @property {number} [memoryLimitMB] - DuckDB memory limit in MB; a runtime tuning knob for browser/Wasm memory pressure, not something derived from temp-directory page sizes
  */
 
 /**
@@ -132,7 +133,8 @@ export class GeoParquetExtractor {
 
     onStatus?.('Configuring DuckDB...');
     await this._duckdb.init();
-    await this._duckdb.query(`SET temp_directory = 'opfs://${OPFS_PREFIX_TMPDIR}${this._sessionId}'`);
+    const tempDirectory = `opfs://${OPFS_PREFIX_TMPDIR}${this._sessionId}`;
+    await configureDuckDBTempDirectory(this._duckdb.db, sql => this._duckdb.query(sql), tempDirectory);
 
     if (this._memoryLimitMB) {
       await this._duckdb.query(`SET memory_limit = '${this._memoryLimitMB}MB'`);
