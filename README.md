@@ -107,24 +107,26 @@ The existing `initDuckDB(distributionUrl, options)` overload and `createDuckDBCl
 import * as duckdb from 'geoparquet-extractor/duckdb';
 import { createDuckDBClient } from 'geoparquet-extractor';
 
-const bundle = await duckdb.selectBundle(duckdb.getLocalBundles());
+const { mvp, eh } = duckdb.getLocalBundles();
+const bundle = await duckdb.selectBundle({ mvp, eh });
 const worker = new Worker(bundle.mainWorker);
 const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
 await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+await db.open({ useDirectIO: true, maximumThreads: 1 });
 const client = createDuckDBClient(db, { memoryLimitMB: 256 });
 ```
 
-When configuring a temp directory, the adapter explicitly registers its OPFS handle pool before setting `temp_directory`. Pool sizes count spare file handles, not memory pages or megabytes. Re-registering the same pool is safe. Reset DuckDB before replacing a pool with open files; reset removes its native file registrations, closes its handles and deletes its private scratch subdirectory. Pre-existing files in the parent directory are preserved.
+The extractor registers the OPFS handle pool once for its session temp directory before setting `temp_directory`. Pool sizes count spare file handles, not memory pages or megabytes. Subsequent extractions reuse that pool. Cancellation terminates the worker; the next initialization creates a fresh database. Session cleanup removes abandoned files. The patch follows this lifecycle and does not add reset/reconfiguration support or isolation for databases sharing a temp directory.
 
-The packaged runtime defaults to `useDirectIO: true` and `maximumThreads: 1` on initialization, open and reset. Direct I/O makes spill files bypass DuckDB-Wasm's native file-page cache, where repeated low-memory sorts otherwise stalled in browser regression tests. One thread also avoids reconfiguring an already-running COI thread pool during startup. These settings do not change `memory_limit`. Custom runtimes should be opened with `await db.open({ useDirectIO: true, maximumThreads: 1 })` before creating connections if they use this OPFS patch. The COI build remains experimental; multi-threaded spilling is not covered by these checks.
+`initDuckDB()` selects MVP/EH and opens the database with `useDirectIO: true` and `maximumThreads: 1` before creating connections. Direct I/O bypasses DuckDB-Wasm's native file-page cache, where repeated low-memory sorts stalled in browser regression tests. These are extractor settings, not patched DuckDB defaults, and do not change `memory_limit`. Manually initialized databases should use the same bundle selection and `db.open()` settings shown above. The experimental threaded COI build cannot load the spatial extension used by this workflow; it remains available for manual use but is excluded from automatic packaged-runtime selection.
 
 ### Maintaining the DuckDB patch
 
-`vendor/duckdb/upstream.json` pins upstream npm version `1.33.1-dev4.0` and its integrity. This is the nearest published upstream build after the former fork's `v1.33.0` base; its runtime source differs only in an S3 helper. `npm run build:duckdb` reconstructs original source and generated Emscripten JavaScript from the pinned package's source maps, applies `vendor/duckdb/opfs.patch`, adds `opfs_pool.js`, and rebuilds the browser client and workers. Matching upstream Wasm files are copied unchanged. The build requires Git, but does not clone the fork, compile C++, or publish another package.
+`vendor/duckdb/upstream.json` pins upstream npm version `1.33.1-dev4.0` and its integrity. This is the nearest published upstream build after the former fork's `v1.33.0` base; its runtime source differs only in an S3 helper. `npm run build:duckdb` reconstructs original source and generated Emscripten JavaScript from the pinned package's source maps, applies `vendor/duckdb/opfs.patch`, and rebuilds the browser client and workers. Matching upstream Wasm files are copied unchanged. The build requires Git, but does not clone the fork, compile C++, or publish another package.
 
 Keep the upstream pin, lockfile and patch together when upgrading. Missing source inputs or a patch that no longer applies fail the build. Final extractor package metadata is embedded before bundling; `dist/duckdb/build.json` records the upstream pin and patch hash.
 
-Run `npm test` for unit and browser integration tests, then `npm run test:package` to install the tarball in a clean consumer and verify TypeScript, Vite asset emission, real OPFS spilling in Chrome and WebKit, and MVP/EH/COI workers in Chrome. WebKit's OPFS checks use a persistent context because Playwright's private contexts do not support OPFS. Install Playwright Chromium and WebKit first (`npx playwright install chromium webkit`). To use installed Chrome locally, set `CHROME_CHANNEL=chrome`; the package check still requires Playwright WebKit. The release workflow publishes that verified tarball. Consumers do not run patching or compilation during installation.
+Run `npm test` for unit and browser integration tests, then `npm run test:package` to install the tarball in a clean consumer and verify TypeScript, Vite asset emission, repeated OPFS spilling and worker restart in Chrome and WebKit, and MVP/EH/COI workers in Chrome. WebKit's OPFS checks use a persistent context because Playwright's private contexts do not support OPFS. Install Playwright Chromium and WebKit first (`npx playwright install chromium webkit`). To use installed Chrome locally, set `CHROME_CHANNEL=chrome`; the package check still requires Playwright WebKit. The release workflow publishes that verified tarball. Consumers do not run patching or compilation during installation.
 
 > **Choosing `memory_limit`:** Treat browser-side defaults as heuristics. They are **not** derived from DuckDB temp-directory page or block sizes. In DuckDB, `memory_limit` controls how much data stays in memory before spilling, while `temp_directory` only controls where spill files are written. For DuckDB-Wasm, conservative defaults are usually driven by browser/WebAssembly memory limits instead.
 

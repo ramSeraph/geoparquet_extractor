@@ -34,64 +34,37 @@
              case WorkerRequestType.COPY_FILE_TO_PATH:
              case WorkerRequestType.DISCONNECT:
              case WorkerRequestType.DROP_FILE:
-@@ -615,6 +616,14 @@
-         await this.postTask(task, []);
+@@ -386,6 +387,7 @@
+         this._config = config;
+         const task = new WorkerTask<WorkerRequestType.OPEN, DuckDBConfig, null>(WorkerRequestType.OPEN, config);
+         await this.postTask(task);
++
      }
  
-+    /** Register OPFS spill handles before setting temp_directory. */
-+    public async registerOPFSTempDir(path?: string, maxUnused?: number, minUnused?: number): Promise<void> {
-+        const task = new WorkerTask<WorkerRequestType.REGISTER_OPFS_TEMP_DIR, [string?, number?, number?], null>(
-+            WorkerRequestType.REGISTER_OPFS_TEMP_DIR, [path, maxUnused, minUnused],
+     /** Tokenize a script text */
+@@ -611,6 +613,13 @@
+         const task = new WorkerTask<WorkerRequestType.REGISTER_OPFS_FILE_NAME, [string], null>(
+             WorkerRequestType.REGISTER_OPFS_FILE_NAME,
+             [name],
 +        );
 +        await this.postTask(task, []);
 +    }
-+
-     /** Enable file statistics */
-     public async collectFileStatistics(name: string, enable: boolean): Promise<void> {
-         const task = new WorkerTask<WorkerRequestType.COLLECT_FILE_STATISTICS, [string, boolean], null>(
++    public async registerOPFSTempDir(name?: string, maxPoolSize?: number, minPoolSize?: number): Promise<void> {
++        const task = new WorkerTask<WorkerRequestType.REGISTER_OPFS_TEMP_DIR, [string?, number?, number?], null>(
++            WorkerRequestType.REGISTER_OPFS_TEMP_DIR,
++            [name, maxPoolSize, minPoolSize],
+         );
+         await this.postTask(task, []);
+     }
 --- a/src/parallel/worker_dispatcher.ts
 +++ b/src/parallel/worker_dispatcher.ts
-@@ -88,6 +88,9 @@
-                             [],
-                         );
-                     });
-+                    // Temp files must bypass the Wasm page cache: repeated spill
-+                    // queries can otherwise stall in FilePageBuffer::FixPage.
-+                    this._bindings.open({ useDirectIO: true, maximumThreads: 1 });
-                     this.sendOK(request);
-                 } catch (e: any) {
-                     console.log(e);
-@@ -130,17 +133,23 @@
-                     );
-                     break;
-                 case WorkerRequestType.RESET:
--                    this._bindings.reset();
-+                    // Native reset is Open() with defaults. Keep our direct-I/O
-+                    // default when recreating the in-memory database.
-+                    this._bindings.open({ useDirectIO: true, maximumThreads: 1 });
-+                    await this._bindings.resetOPFSTempDir();
+@@ -365,7 +365,10 @@
+                     await this._bindings.registerOPFSFileName(request.data[0]);
                      this.sendOK(request);
                      break;
- 
-                 case WorkerRequestType.OPEN: {
-+                    request.data.useDirectIO ??= true;
-+                    request.data.maximumThreads ??= 1;
-                     const path = request.data.path;
-                     if (path?.startsWith('opfs://')) {
-                         await this._bindings.prepareDBFileHandle(path, DuckDBDataProtocol.BROWSER_FSACCESS);
-                         request.data.useDirectIO = true;
-                     }
-                     this._bindings.open(request.data);
-+                    await this._bindings.resetOPFSTempDir();
-                     this.sendOK(request);
-                     break;
-                 }
-@@ -366,6 +375,10 @@
-                     this.sendOK(request);
-                     break;
- 
+-
 +                case WorkerRequestType.REGISTER_OPFS_TEMP_DIR:
-+                    await this._bindings.registerOPFSTempDir(...request.data);
++                    await this._bindings.registerOPFSTempDir(request.data[0], request.data[1], request.data[2]);
 +                    this.sendOK(request);
 +                    break;
                  case WorkerRequestType.EXPORT_FILE_STATISTICS: {
@@ -99,50 +72,43 @@
                          {
 --- a/src/bindings/bindings_base.ts
 +++ b/src/bindings/bindings_base.ts
-@@ -1,3 +1,4 @@
-+import { OPFSTempPool, canonicalTempPath } from '../utils/opfs_pool';
- import { DuckDBModule, PThread } from './duckdb_module';
- import { DuckDBConfig } from './config';
- import { Logger } from '../log';
-@@ -696,6 +697,31 @@
-         dropResponseBuffers(this.mod);
-         return copy;
+@@ -13,6 +13,7 @@
+ import { WebFile } from './web_file';
+ import { UDFFunction, UDFFunctionDeclaration } from './udf_function';
+ import * as arrow from 'apache-arrow';
++import { createOPFSTempPool } from '../utils/opfs_util';
+ 
+ const TEXT_ENCODER = new TextEncoder();
+ 
+@@ -701,6 +702,21 @@
+             throw new Error('Not an OPFS file name: ' + file);
+         }
      }
-+    /** Only the worker dispatcher calls this after a successful native reset/open. */
-+    public async resetOPFSTempDir(): Promise<void> {
-+        const runtime = this._runtime as any;
-+        const pool = runtime._opfsTmpPool;
-+        if (!pool) return;
-+        for (const name of [...pool.open.keys()]) this.dropFile(name);
-+        runtime._opfsTmpPool = null;
-+        await pool.destroy();
-+    }
 +
-+    public async registerOPFSTempDir(path?: string, maxUnused?: number, minUnused?: number): Promise<void> {
++    public async registerOPFSTempDir(tempPath?: string, maxPoolSize?: number, minPoolSize?: number): Promise<void> {
++        // Access BROWSER_RUNTIME through the runtime field
 +        const runtime = this._runtime as any;
-+        const pool = runtime._opfsTmpPool;
-+        if (path) path = canonicalTempPath(path);
-+        if (pool && path === pool.path &&
-+            (maxUnused === undefined || maxUnused === pool.maxUnused) &&
-+            (minUnused === undefined || minUnused === pool.minUnused)) return;
-+        if (pool?.open.size) {
-+            throw new Error('Reset DuckDB before replacing an OPFS temp pool that has open files');
++
++        if (runtime._opfsTmpPool) {
++            await runtime._opfsTmpPool.destroy();
++            runtime._opfsTmpPool = null;
 +        }
-+        const replacement = path ? await OPFSTempPool.create(path, maxUnused, minUnused) : null;
-+        await this.resetOPFSTempDir();
-+        runtime._opfsTmpPool = replacement;
++
++        if (tempPath) {
++            runtime._opfsTmpPool = await createOPFSTempPool(tempPath, { maxUnused: maxPoolSize, minUnused: minPoolSize });
++        }
 +    }
 +
-     /** Enable tracking of file statistics */
-     public async registerOPFSFileName(file: string): Promise<void> {
-         if (file.startsWith('opfs://')) {
+     public collectFileStatistics(file: string, enable: boolean): void {
+         const [s, d, n] = callSRet(this.mod, 'duckdb_web_collect_file_stats', ['string', 'boolean'], [file, enable]);
+         if (s !== StatusCode.SUCCESS) {
 --- a/src/bindings/runtime_browser.ts
 +++ b/src/bindings/runtime_browser.ts
 @@ -16,6 +16,7 @@
  } from './runtime';
  import { DuckDBModule } from './duckdb_module';
  import * as udf from './udf_runtime';
-+import { OPFSTempPool } from '../utils/opfs_pool';
++import { TmpPool } from '../utils/opfs_util';
  
  const OPFS_PREFIX_LEN = 'opfs://'.length;
  const PATH_SEP_REGEX = /\/|\\/;
@@ -150,7 +116,7 @@
      _globalFileInfo: DuckDBGlobalFileInfo | null;
      _preparedHandles: Record<string, FileSystemSyncAccessHandle>;
      _opfsRoot: FileSystemDirectoryHandle | null;
-+    _opfsTmpPool: OPFSTempPool | null;
++    _opfsTmpPool: TmpPool | null;
  
      getFileInfo(mod: DuckDBModule, fileId: number): DuckDBFileInfo | null;
      getGlobalFileInfo(mod: DuckDBModule): DuckDBGlobalFileInfo | null;
@@ -162,39 +128,57 @@
  
      getFileInfo(mod: DuckDBModule, fileId: number): DuckDBFileInfo | null {
          try {
-@@ -417,7 +420,12 @@
+@@ -417,7 +420,21 @@
                      return result;
                  }
                  case DuckDBDataProtocol.BROWSER_FSACCESS: {
 -                    const handle: FileSystemSyncAccessHandle = BROWSER_RUNTIME._files?.get(file.fileName);
-+                    let handle: FileSystemSyncAccessHandle = BROWSER_RUNTIME._files?.get(file.fileName);
-+                    const pool = BROWSER_RUNTIME._opfsTmpPool;
-+                    if (!handle && pool?.matches(file.fileName)) {
-+                        handle = pool.openFile(file.fileName);
-+                        BROWSER_RUNTIME._files.set(file.fileName, handle);
++                    let handle: FileSystemSyncAccessHandle | undefined = BROWSER_RUNTIME._files?.get(file.fileName);
++
++                    // Check if this file belongs to a registered temp directory.
++                    // DuckDB creates temp files on-the-fly during query execution (for spilling),
++                    // calling openFile() synchronously. Since OPFS file creation is async, we can't
++                    // create new files here. Instead, we use pre-allocated file handles from the
++                    // temp pool that was set up when the temp directory was registered.
++                    if (!handle && BROWSER_RUNTIME._opfsTmpPool) {
++                        const pool = BROWSER_RUNTIME._opfsTmpPool;
++                        if (pool.matches(file.fileName)) {
++                            handle = pool.openFile(file.fileName);
++                            BROWSER_RUNTIME._files.set(file.fileName, handle);
++                        }
 +                    }
++
                      if (!handle) {
                          throw new Error(`No OPFS access handle registered with name: ${file.fileName}`);
                      }
-@@ -557,6 +565,10 @@
+@@ -529,6 +546,7 @@
+     closeFile: (mod: DuckDBModule, fileId: number) => {
+         const file = BROWSER_RUNTIME.getFileInfo(mod, fileId);
+         BROWSER_RUNTIME._fileInfoCache.delete(fileId);
++
+         try {
+             switch (file?.dataProtocol) {
+                 case DuckDBDataProtocol.BUFFER:
+@@ -557,6 +575,10 @@
          const handle: FileSystemSyncAccessHandle = BROWSER_RUNTIME._files?.get(fileName);
          if (handle) {
              BROWSER_RUNTIME._files.delete(fileName);
-+            if (BROWSER_RUNTIME._opfsTmpPool?.owns(fileName)) {
++            if (BROWSER_RUNTIME._opfsTmpPool && BROWSER_RUNTIME._opfsTmpPool.matches(fileName)) {
 +                BROWSER_RUNTIME._opfsTmpPool.dropFile(fileName);
 +                return;
 +            }
              if (handle instanceof FileSystemSyncAccessHandle) {
                  try {
                      handle.flush();
-@@ -769,7 +781,13 @@
+@@ -769,7 +791,14 @@
          }
          return true;
      },
 -    removeFile: (_mod: DuckDBModule, _pathPtr: number, _pathLen: number) => {},
 +    removeFile: (mod: DuckDBModule, pathPtr: number, pathLen: number) => {
 +        const path = readString(mod, pathPtr, pathLen);
-+        if (BROWSER_RUNTIME._opfsTmpPool?.owns(path)) {
++
++        if (BROWSER_RUNTIME._opfsTmpPool && BROWSER_RUNTIME._opfsTmpPool.matches(path)) {
 +            BROWSER_RUNTIME._files.delete(path);
 +            BROWSER_RUNTIME._opfsTmpPool.dropFile(path);
 +        }
@@ -202,6 +186,137 @@
      callScalarUDF: (
          mod: DuckDBModule,
          response: number,
+--- a/src/utils/opfs_util.ts
++++ b/src/utils/opfs_util.ts
+@@ -7,4 +7,126 @@
+ 
+ export function searchOPFSFiles(text: string) {
+     return [...text.matchAll(REGEX_OPFS_FILE)].map(match => match[1]);
+-}
+\ No newline at end of file
++}
++
++type HandleEntry = { name: string; handle: FileSystemSyncAccessHandle };
++
++export type TmpPoolConfig = { maxUnused?: number; minUnused?: number };
++
++/**
++ * TmpPool manages pre-allocated OPFS file handles for temporary files.
++ *
++ * DuckDB's file operations (openFile, dropFile, etc.) are synchronous C++ calls
++ * that cannot be made async. However, OPFS file creation requires async APIs.
++ * When DuckDB needs to create temporary files for spilling data to disk, it
++ * calls openFile synchronously, expecting an immediate file handle.
++ *
++ * To work around this API mismatch, we pre-create a pool of OPFS files with
++ * their sync access handles during the async temp directory registration. When
++ * DuckDB needs a temp file, we can synchronously hand out one of these
++ * pre-created handles from the pool. When the file is closed, we clear it and
++ * return it to the pool for reuse.
++ */
++export class TmpPool {
++  public readonly path: string;
++  private dir: FileSystemDirectoryHandle;
++  private maxUnused: number;
++  private minUnused: number;
++  private pool: HandleEntry[] = []; // unused files.
++  private openMap = new Map<string, HandleEntry>(); // checked out files.
++  private nextId = 1;
++  private refillInFlight = false;
++
++  constructor(
++    path: string,
++    dir: FileSystemDirectoryHandle,
++    maxUnused: number = 4,
++    minUnused: number = 2
++  ) {
++    if (minUnused >= maxUnused) throw new Error("minUnused must be < maxUnused");
++    this.path = canonicalDirUrl(path);
++    this.dir = dir;
++    this.maxUnused = maxUnused;
++    this.minUnused = minUnused;
++  }
++
++  async init(): Promise<void> { await this.refillTo(this.maxUnused); }
++
++  matches(path: string): boolean {
++    const canonical = canonicalDirUrl(path);
++    return canonical === this.path || canonical.startsWith(this.path);
++  }
++
++  openFile(path: string): FileSystemSyncAccessHandle {
++    const existing = this.openMap.get(path); if (existing) return existing.handle;
++    if (this.pool.length === 0) throw new Error("OPFS tmp pool exhausted");
++    const entry = this.pool.pop()!; this.openMap.set(path, entry);
++    if (this.pool.length < this.minUnused) this.maybeRefillAsync();
++    return entry.handle;
++  }
++
++  dropFile(path: string): void {
++    const entry = this.openMap.get(path); if (!entry) return;
++    entry.handle.flush();
++
++    if (this.pool.length >= this.maxUnused) {
++      this.asyncDelete(entry).catch(() => {});
++    } else {
++      entry.handle.truncate(0);
++      this.pool.push(entry);
++    }
++    this.openMap.delete(path);
++  }
++
++  async destroy(): Promise<void> {
++    await Promise.all(this.pool.splice(0).map(e => this.asyncDelete(e)));
++  }
++
++  private async createEntry(): Promise<HandleEntry> {
++    const name = `tmp${this.nextId++}`;
++    const fh = await this.dir.getFileHandle(name, { create: true });
++    const sah = await fh.createSyncAccessHandle();
++    sah.truncate(0);
++    return { name, handle: sah };
++  }
++  private async refillTo(target: number): Promise<void> {
++    while (this.pool.length < target) {
++      const e = await this.createEntry(); this.pool.push(e);
++    }
++  }
++  private maybeRefillAsync() {
++    if (this.refillInFlight) return;
++    this.refillInFlight = true;
++    this.refillTo(this.maxUnused).finally(() => { this.refillInFlight = false; });
++  }
++  private async asyncDelete(e: HandleEntry) {
++    try { e.handle.flush(); } catch { /* ignore errors */ }
++    try { e.handle.close(); } catch { /* ignore errors */ }
++    try { await this.dir.removeEntry(e.name); } catch { /* ignore errors */ }
++  }
++}
++
++export function canonicalDirUrl(url: string) {
++  return url.replace(/\/+$/, "");
++}
++
++export async function resolveOpfsDirectory(opfsUrl: string): Promise<FileSystemDirectoryHandle> {
++  const root = await (navigator as any).storage.getDirectory();
++  const rel = opfsUrl.slice("opfs://".length).replace(/^\/+/, "");
++  const parts = rel.split("/").filter(Boolean);
++  let dir: FileSystemDirectoryHandle = root;
++  for (const p of parts) {
++    dir = await dir.getDirectoryHandle(p, { create: true });
++  }
++  return dir;
++}
++
++export async function createOPFSTempPool(opfsDirUrl: string, cfg: TmpPoolConfig = {}) : Promise<TmpPool> {
++  const key = canonicalDirUrl(opfsDirUrl);
++  const dir = await resolveOpfsDirectory(key);
++  const maxUnused = cfg.maxUnused ?? 10;
++  const minUnused = cfg.minUnused ?? 2;
++  const pool = new TmpPool(key, dir, maxUnused, minUnused);
++  await pool.init();
++  return pool;
++}
 --- a/src/platform.ts
 +++ b/src/platform.ts
 @@ -41,7 +41,7 @@

@@ -111,6 +111,9 @@ export async function initDuckDB(duckdbDist, options = {}) {
       const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
       const db = new duckdb.AsyncDuckDB(logger, worker);
       await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+      // Repeated spill queries need direct I/O; configure the database once,
+      // before connections or a COI thread pool are created.
+      await db.open({ useDirectIO: true, maximumThreads: 1 });
       return { db, worker };
     } catch (error) {
       worker?.terminate();

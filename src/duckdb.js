@@ -22,5 +22,7 @@ export function getLocalBundles() {
 }
 
 export async function loadBundledDuckDB() {
-  return { duckdb, bundle: await duckdb.selectBundle(getLocalBundles()) };
+  // Spatial extensions require the non-threaded runtime, even on isolated pages.
+  const { mvp, eh } = getLocalBundles();
+  return { duckdb, bundle: await duckdb.selectBundle({ mvp, eh }) };
 }

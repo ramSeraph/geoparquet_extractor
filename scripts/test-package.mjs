@@ -26,33 +26,32 @@ try {
   assert(!Object.keys(lock.packages).some(name => /duckdb-wasm/.test(name)), 'Consumer must not install a separate DuckDB package');
   await writeFile(path.join(fixture, 'index.html'), '<!doctype html><script type="module" src="/main.js"></script>');
   await writeFile(path.join(fixture, 'main.js'), `
-import { initDuckDB } from 'geoparquet-extractor';
+import { GeoParquetExtractor, initDuckDB } from 'geoparquet-extractor';
 import * as duckdb from 'geoparquet-extractor/duckdb';
 globalThis.checkPackage = async (allVariants = true) => {
   const results = {};
   globalThis.packageTestStage = 'default runtime instantiation';
   const client = await initDuckDB();
-  const db = client.db;
-  const name = 'packed-' + crypto.randomUUID();
-  try {
-    globalThis.packageTestStage = 'default runtime OPFS spill';
-    const conn = await db.connect();
-    await db.registerOPFSTempDir('opfs://' + name);
-    await conn.query("SET threads=1; SET temp_directory='opfs://" + name + "'; SET memory_limit='4MB'; SET max_temp_directory_size='100MiB'");
-    results.spill = String((await conn.query('SELECT COUNT(*) FROM (SELECT i FROM range(0, 800000) i ORDER BY hash(i) LIMIT 100000)')).getChildAt(0).get(0));
-    await conn.close();
-    await db.reset();
-    await db.registerOPFSTempDir('opfs://' + name);
-    const next = await db.connect();
-    await next.query("SET threads=1; SET temp_directory='opfs://" + name + "'; SET memory_limit='4MB'; SET max_temp_directory_size='100MiB'");
-    results.afterReset = String((await next.query('SELECT COUNT(*) FROM (SELECT i FROM range(0, 800000) i ORDER BY hash(i) LIMIT 100000)')).getChildAt(0).get(0));
+  const extractor = new GeoParquetExtractor({ duckdb: client, memoryLimitMB: 4 });
+  const query = 'SELECT COUNT(*) FROM (SELECT i FROM range(0, 800000) i ORDER BY hash(i) LIMIT 100000)';
+  async function repeatSpill() {
+    await extractor.init();
+    await client.query("SET max_temp_directory_size='100MiB'");
+    let result;
     for (let i = 0; i < 3; i++) {
-      const repeated = String((await next.query('SELECT COUNT(*) FROM (SELECT i FROM range(0, 800000) i ORDER BY hash(i) LIMIT 100000)')).getChildAt(0).get(0));
-      if (repeated !== '100000') throw new Error('Repeated spill returned ' + repeated);
+      result = String((await client.query(query)).getChildAt(0).get(0));
+      if (result !== '100000') throw new Error('Repeated spill returned ' + result);
     }
-    await next.close();
-    await db.reset();
-    await (await navigator.storage.getDirectory()).removeEntry(name, { recursive: true });
+    return result;
+  }
+  try {
+    globalThis.packageTestStage = 'extractor OPFS spill';
+    results.spill = await repeatSpill();
+    const firstDB = client.db;
+    extractor.cancel();
+    globalThis.packageTestStage = 'extractor restart after cancellation';
+    results.afterRestart = await repeatSpill();
+    if (client.db === firstDB) throw new Error('Cancellation did not recreate DuckDB');
   } finally { client.terminate(); }
   for (const [variant, bundle] of Object.entries(allVariants ? duckdb.getLocalBundles() : {})) {
     globalThis.packageTestStage = variant + ' worker';
@@ -60,11 +59,10 @@ globalThis.checkPackage = async (allVariants = true) => {
     const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(duckdb.LogLevel.ERROR), worker);
     try {
       await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-      await db.open({ maximumThreads: 1 });
+      await db.open({ useDirectIO: true, maximumThreads: 1 });
       const conn = await db.connect();
       results[variant] = (await conn.query('SELECT 42 AS n')).getChildAt(0).get(0);
       await conn.close();
-      await db.reset();
     } finally { worker.terminate(); }
   }
   results.package = duckdb.PACKAGE_NAME;
@@ -108,13 +106,13 @@ initDuckDB({ memoryLimitMB: 64 });
       new Promise((_, reject) => setTimeout(() => reject(new Error('Package smoke test timed out: ' + globalThis.packageTestStage)), 60000)),
     ]), allVariants);
   }
-  assert.deepEqual(await checkBrowser(true), { spill: '100000', afterReset: '100000', mvp: 42, eh: 42, coi: 42, package: 'geoparquet-extractor' });
+  assert.deepEqual(await checkBrowser(true), { spill: '100000', afterRestart: '100000', mvp: 42, eh: 42, coi: 42, package: 'geoparquet-extractor' });
   await browser.close();
   // OPFS is unavailable in Playwright WebKit's ephemeral/private contexts.
   // https://github.com/microsoft/playwright/blob/main/docs/src/api/class-browsercontext.md
   browser = await webkit.launchPersistentContext(path.join(fixture, 'webkit-profile'), { headless: true });
-  assert.deepEqual(await checkBrowser(false), { spill: '100000', afterReset: '100000', package: 'geoparquet-extractor' });
-  console.log(`Verified ${packed.filename}: clean install, TypeScript, Vite, Chrome/WebKit OPFS spill and reset, MVP/EH/COI workers`);
+  assert.deepEqual(await checkBrowser(false), { spill: '100000', afterRestart: '100000', package: 'geoparquet-extractor' });
+  console.log(`Verified ${packed.filename}: clean install, TypeScript, Vite, Chrome/WebKit OPFS spill and cancellation/restart, MVP/EH/COI workers`);
 } finally {
   await browser?.close();
   if (server) await new Promise(resolve => server.close(resolve));

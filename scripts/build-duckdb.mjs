@@ -65,7 +65,6 @@ try {
   const patchPath = path.join(root, 'vendor/duckdb/opfs.patch');
   execFileSync('git', ['apply', '--check', patchPath], { cwd: scratch, stdio: 'inherit' });
   execFileSync('git', ['apply', patchPath], { cwd: scratch, stdio: 'inherit' });
-  await cp(path.join(root, 'vendor/duckdb/opfs_pool.js'), path.join(scratch, 'src/utils/opfs_pool.js'));
 
   await mkdir(output, { recursive: true });
   const common = {
@@ -119,7 +118,6 @@ export declare function loadBundledDuckDB(): Promise<{ duckdb: typeof duckdb; bu
   }
   const hash = createHash('sha256');
   hash.update(await readFile(patchPath));
-  hash.update(await readFile(path.join(root, 'vendor/duckdb/opfs_pool.js')));
   await writeFile(path.join(output, 'build.json'), JSON.stringify({
     package: pkg.name, version: pkg.version, upstream: pin, patchSha256: hash.digest('hex'),
   }, null, 2) + '\n');
