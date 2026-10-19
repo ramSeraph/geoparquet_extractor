@@ -5,16 +5,28 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { chromium, webkit } from 'playwright';
 import { build } from 'vite';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const { values: options } = parseArgs({ options: {
+  chrome: { type: 'boolean' },
+  browser: { type: 'string', default: 'all' },
+  tarball: { type: 'string' },
+} });
+assert(['all', 'chromium', 'webkit'].includes(options.browser), 'Expected --browser all, chromium, or webkit');
 const artifacts = path.join(root, '.artifacts');
 await mkdir(artifacts, { recursive: true });
-const [packed] = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', artifacts], {
-  cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'],
-}));
-const tarball = path.join(artifacts, packed.filename);
+let tarball;
+if (options.tarball) {
+  tarball = path.resolve(options.tarball);
+} else {
+  const [packed] = JSON.parse(execFileSync('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', artifacts], {
+    cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'],
+  }));
+  tarball = path.join(artifacts, packed.filename);
+}
 const fixture = await realpath(await mkdtemp(path.join(tmpdir(), 'geoparquet-consumer-')));
 let server, browser;
 try {
@@ -93,8 +105,6 @@ initDuckDB({ memoryLimitMB: 64 });
     } catch { res.writeHead(404); res.end(); }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const channel = process.env.CHROME_CHANNEL || (process.argv.includes('--chrome') ? 'chrome' : undefined);
-  browser = await chromium.launch({ headless: true, ...(channel ? { channel } : {}) });
   async function checkBrowser(allVariants) {
     const page = await browser.newPage();
     page.on('pageerror', error => console.error('Consumer page:', error.message));
@@ -106,13 +116,23 @@ initDuckDB({ memoryLimitMB: 64 });
       new Promise((_, reject) => setTimeout(() => reject(new Error('Package smoke test timed out: ' + globalThis.packageTestStage)), 60000)),
     ]), allVariants);
   }
-  assert.deepEqual(await checkBrowser(true), { spill: '100000', afterRestart: '100000', mvp: 42, eh: 42, coi: 42, package: 'geoparquet-extractor' });
-  await browser.close();
-  // OPFS is unavailable in Playwright WebKit's ephemeral/private contexts.
-  // https://github.com/microsoft/playwright/blob/main/docs/src/api/class-browsercontext.md
-  browser = await webkit.launchPersistentContext(path.join(fixture, 'webkit-profile'), { headless: true });
-  assert.deepEqual(await checkBrowser(false), { spill: '100000', afterRestart: '100000', package: 'geoparquet-extractor' });
-  console.log(`Verified ${packed.filename}: clean install, TypeScript, Vite, Chrome/WebKit OPFS spill and cancellation/restart, MVP/EH/COI workers`);
+  const checked = [];
+  if (options.browser !== 'webkit') {
+    const channel = process.env.CHROME_CHANNEL || (options.chrome ? 'chrome' : undefined);
+    browser = await chromium.launch({ headless: true, ...(channel ? { channel } : {}) });
+    assert.deepEqual(await checkBrowser(true), { spill: '100000', afterRestart: '100000', mvp: 42, eh: 42, coi: 42, package: 'geoparquet-extractor' });
+    await browser.close();
+    browser = null;
+    checked.push('Chromium (MVP/EH/COI)');
+  }
+  if (options.browser !== 'chromium') {
+    // OPFS is unavailable in Playwright WebKit's ephemeral/private contexts.
+    // https://github.com/microsoft/playwright/blob/main/docs/src/api/class-browsercontext.md
+    browser = await webkit.launchPersistentContext(path.join(fixture, 'webkit-profile'), { headless: true });
+    assert.deepEqual(await checkBrowser(false), { spill: '100000', afterRestart: '100000', package: 'geoparquet-extractor' });
+    checked.push('WebKit');
+  }
+  console.log(`Verified ${path.basename(tarball)}: clean install, TypeScript, Vite, ${checked.join(' and ')} OPFS spill and cancellation/restart`);
 } finally {
   await browser?.close();
   if (server) await new Promise(resolve => server.close(resolve));
