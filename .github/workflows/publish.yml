@@ -7,7 +7,8 @@ on:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    # The package check needs real OPFS, unavailable in the Linux WebKit runner.
+    runs-on: macos-latest
     environment: npm
     permissions:
       contents: write
