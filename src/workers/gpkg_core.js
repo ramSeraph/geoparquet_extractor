@@ -250,10 +250,17 @@ export async function writeFromParquet({ parquetFileName, gpkgFileName }, msgId,
       )
     `);
 
+    // Preserve source IDs, which need not be unique or integer-valued.
+    // SQLite column names are case-insensitive.
+    const columnNames = new Set(columns.map((column) => column.name.toLowerCase()));
+    let primaryKey = 'fid';
+    for (let suffix = 1; columnNames.has(primaryKey); suffix++) {
+      primaryKey = `fid_${suffix}`;
+    }
     const colDefs = columns.map((column) => `"${column.name}" ${column.sqliteType}`).join(', ');
     await dbRuntime.exec(`
       CREATE TABLE features (
-        fid INTEGER PRIMARY KEY AUTOINCREMENT,
+        ${primaryKey} INTEGER PRIMARY KEY AUTOINCREMENT,
         geom BLOB,
         _bbox_minx REAL, _bbox_miny REAL, _bbox_maxx REAL, _bbox_maxy REAL
         ${columns.length > 0 ? ', ' + colDefs : ''}
@@ -345,7 +352,7 @@ export async function writeFromParquet({ parquetFileName, gpkgFileName }, msgId,
     `);
 
     await dbRuntime.exec('CREATE VIRTUAL TABLE rtree_features_geom USING rtree(id, minx, maxx, miny, maxy)');
-    await dbRuntime.exec('INSERT INTO rtree_features_geom (id, minx, maxx, miny, maxy) SELECT fid, _bbox_minx, _bbox_maxx, _bbox_miny, _bbox_maxy FROM features');
+    await dbRuntime.exec(`INSERT INTO rtree_features_geom (id, minx, maxx, miny, maxy) SELECT ${primaryKey}, _bbox_minx, _bbox_maxx, _bbox_miny, _bbox_maxy FROM features`);
 
     for (const column of ['_bbox_minx', '_bbox_miny', '_bbox_maxx', '_bbox_maxy']) {
       await dbRuntime.exec(`ALTER TABLE features DROP COLUMN ${column}`);

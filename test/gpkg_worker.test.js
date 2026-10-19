@@ -164,6 +164,77 @@ describe('gpkg_worker test seams', () => {
     expect(executedSql.at(-1)).toBe('CLOSE');
   });
 
+  it.each([['name'], ['fid'], ['FID', 'fid_1']].map(names => [names]))(
+    'preserves source columns %j and indexes generated IDs in real SQLite',
+    async (names) => {
+      const [{ default: SQLiteESMFactory }, SQLite, { default: wasmUrl }] = await Promise.all([
+        import('wa-sqlite-rtree/dist/wa-sqlite-async.mjs'),
+        import('wa-sqlite-rtree/src/sqlite-api.js'),
+        import('wa-sqlite-rtree/dist/wa-sqlite-async.wasm?url'),
+      ]);
+      const module = await SQLiteESMFactory({ locateFile: () => wasmUrl });
+      const sqlite3 = SQLite.Factory(module);
+      const db = await sqlite3.open_v2(':memory:');
+      const query = async (sql) => {
+        const rows = [];
+        await sqlite3.exec(db, sql, (row, columns) => {
+          rows.push(Object.fromEntries(columns.map((name, i) => [name, row[i]])));
+        });
+        return rows;
+      };
+      const internalNames = ['geom_wkb', '_geom_type', '_bbox_minx', '_bbox_miny', '_bbox_maxx', '_bbox_maxy'];
+      parquetMetadataAsyncMock.mockResolvedValue({ row_groups: [{ num_rows: 3 }] });
+      parquetSchemaMock.mockReturnValue({
+        children: [...internalNames, ...names].map(name => ({ element: { name, type: 'BYTE_ARRAY' } })),
+      });
+      buildNormalizerMock.mockReturnValue(value => value);
+      const values = ['source-id', 'source-id', null];
+      parquetReadMock.mockImplementation(async ({ columns, onComplete }) => {
+        onComplete(values.map(value => columns ? ['POINT', 0, 0, 0, 0] : [
+          '010100000000000000000000000000000000000000', 'POINT', 0, 0, 0, 0,
+          ...names.map(() => value),
+        ]));
+      });
+      try {
+        await gpkgWorker.writeFromParquet(
+          { parquetFileName: 'input.parquet', gpkgFileName: 'out.gpkg' }, 1,
+          {
+            getRoot: async () => ({ getFileHandle: async () => ({ getFile: async () => new Blob() }) }),
+            postMessage: () => {},
+            getTimestamp: () => new Date('2026-03-27T00:00:00Z'),
+            createDatabaseRuntime: async () => ({
+              exec: sql => sqlite3.exec(db, sql),
+              async insertBatch(sql, paramSets) {
+                for await (const stmt of sqlite3.statements(db, sql)) {
+                  for (const params of paramSets) {
+                    await sqlite3.reset(stmt);
+                    sqlite3.bind_collection(stmt, params);
+                    await sqlite3.step(stmt);
+                  }
+                }
+              },
+              close: async () => {},
+            }),
+          }
+        );
+        const columns = await query('PRAGMA table_info(features)');
+        const primaryKey = columns.find(column => column.pk === 1).name;
+        expect(names.map(name => name.toLowerCase())).not.toContain(primaryKey.toLowerCase());
+        const rows = await query(`SELECT * FROM features ORDER BY "${primaryKey}"`);
+        for (const name of names) expect(rows.map(row => row[name])).toEqual(values);
+        expect(rows.map(row => row[primaryKey])).toEqual([1, 2, 3]);
+        const indexedRows = await query(`
+          SELECT f."${primaryKey}" AS feature_id, r.id AS index_id
+          FROM features f LEFT JOIN rtree_features_geom r ON f."${primaryKey}" = r.id
+          ORDER BY f."${primaryKey}"
+        `);
+        expect(indexedRows).toEqual([1, 2, 3].map(id => ({ feature_id: id, index_id: id })));
+      } finally {
+        await sqlite3.close(db);
+      }
+    }
+  );
+
   it('writeFromParquet promotes mixed Point and MultiPoint metadata to MULTIPOINT', async () => {
     const executedSql = [];
     const fakeFile = {
